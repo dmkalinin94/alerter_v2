@@ -1,0 +1,48 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "alerts_cli add verbose",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/alerts_cli.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "args": [
+                "-v",
+                "add",
+                "--event",
+                "1",
+                "--tags",
+                "linux",
+                "--severity",
+                "High",
+                "--insightId",
+                "12345",
+                "--groups",
+                "Servers",
+                "--triggerTime",
+                "2026.06.19 10:30:00",
+                "--trigName",
+                "High CPU load",
+                "--message",
+                "CPU usage is above 90%",
+                "--timestamp",
+                "1781857800"
+            ]
+        },
+        {
+            "name": "alerts_cli get",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/alerts_cli.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "args": [
+                "get"
+            ]
+        }
+    ]
+}
