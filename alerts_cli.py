@@ -156,7 +156,7 @@ def CopyDictionary(source_dictionary):
 
 def GetActionTemplate(template_name):
     if template_name == "inc":
-        return CopyDictionary(ACTION_TEMPLATE_INC)
+        return {}
 
     raise ValueError("Unsupported template: {}".format(template_name))
 
@@ -202,9 +202,21 @@ def CreateEventOneAlertData(args):
         "message": args.message,
         "severity": args.severity,
         "action": CopyDictionary(action_template),
-        "balance": 1
+        "eventBalance": 1,
+        "criticalEventBalance": 0
     }
     return alert_data
+
+
+def GetExistingEventBalance(alert_data):
+    if "eventBalance" in alert_data:
+        return GetIntegerValue(alert_data.get("eventBalance"), "eventBalance")
+
+    return GetIntegerValue(alert_data.get("balance", 0), "balance")
+
+
+def GetExistingCriticalEventBalance(alert_data):
+    return GetIntegerValue(alert_data.get("criticalEventBalance", 0), "criticalEventBalance")
 
 
 def ApplyEventOneToAlertList(alert_dictionary_list, root_key, args):
@@ -213,30 +225,46 @@ def ApplyEventOneToAlertList(alert_dictionary_list, root_key, args):
 
     if alert_dictionary is None:
         alert_data = CreateEventOneAlertData(args)
+        if new_severity == 5:
+            alert_data["criticalEventBalance"] = 1
         alert_dictionary_list.append({root_key: alert_data.copy()})
-        WriteLog("Root key {} added with balance 1".format(root_key), "INFO")
+        WriteLog("Root key {} added with event balance {} and critical event balance {}".format(
+            root_key,
+            alert_data["eventBalance"],
+            alert_data["criticalEventBalance"]
+        ), "INFO")
         return
 
     alert_data = alert_dictionary[root_key]
     if not isinstance(alert_data, dict):
         raise ValueError("Invalid alert data for root key {}".format(root_key))
 
-    old_balance = alert_data.get("balance", 0)
-    old_balance = GetIntegerValue(old_balance, "balance")
+    old_event_balance = GetExistingEventBalance(alert_data)
+    old_critical_event_balance = GetExistingCriticalEventBalance(alert_data)
     old_severity = alert_data.get("severity", "0")
     old_severity = GetIntegerValue(old_severity, "severity")
 
-    alert_data["balance"] = old_balance + 1
+    alert_data["eventBalance"] = old_event_balance + 1
+    if new_severity == 5:
+        alert_data["criticalEventBalance"] = old_critical_event_balance + 1
+    else:
+        alert_data["criticalEventBalance"] = old_critical_event_balance
+
     if "action" not in alert_data:
         alert_data["action"] = GetActionTemplate(args.template)
     if new_severity > old_severity:
         alert_data["severity"] = args.severity
 
-    WriteLog("Root key {} updated, balance is {}".format(root_key, alert_data["balance"]), "INFO")
+    WriteLog("Root key {} updated, event balance is {}, critical event balance is {}".format(
+        root_key,
+        alert_data["eventBalance"],
+        alert_data["criticalEventBalance"]
+    ), "INFO")
 
 
-def ApplyEventZeroToAlertList(alert_dictionary_list, root_key):
+def ApplyEventZeroToAlertList(alert_dictionary_list, root_key, args):
     alert_dictionary = FindAlertDictionaryByRootKey(alert_dictionary_list, root_key)
+    severity_value = GetIntegerValue(args.severity, "severity")
 
     if alert_dictionary is None:
         WriteLog("Root key {} was not found for event 0, nothing changed".format(root_key), "INFO")
@@ -246,11 +274,20 @@ def ApplyEventZeroToAlertList(alert_dictionary_list, root_key):
     if not isinstance(alert_data, dict):
         raise ValueError("Invalid alert data for root key {}".format(root_key))
 
-    old_balance = alert_data.get("balance", 0)
-    old_balance = GetIntegerValue(old_balance, "balance")
-    alert_data["balance"] = old_balance - 1
+    old_event_balance = GetExistingEventBalance(alert_data)
+    old_critical_event_balance = GetExistingCriticalEventBalance(alert_data)
 
-    WriteLog("Root key {} decreased, balance is {}".format(root_key, alert_data["balance"]), "INFO")
+    alert_data["eventBalance"] = old_event_balance - 1
+    if severity_value == 5:
+        alert_data["criticalEventBalance"] = old_critical_event_balance - 1
+    else:
+        alert_data["criticalEventBalance"] = old_critical_event_balance
+
+    WriteLog("Root key {} decreased, event balance is {}, critical event balance is {}".format(
+        root_key,
+        alert_data["eventBalance"],
+        alert_data["criticalEventBalance"]
+    ), "INFO")
 
 
 def GetTopLevelValueByKey(alert_dictionary_list, root_key):
@@ -414,13 +451,20 @@ def UpdateAlertDictionaryList(args):
     if event_value != 0 and event_value != 1:
         raise ValueError("Unsupported event value: {}".format(args.event))
 
+    severity_value = GetIntegerValue(args.severity, "severity")
+    if severity_value == 0:
+        WriteLog("Severity is 0, no action is required", "INFO")
+        return
+    if severity_value < 1 or severity_value > 5:
+        raise ValueError("Unsupported severity value: {}".format(args.severity))
+
     alert_dictionary_list = LoadAlertDictionaryList(args.state_file)
 
     for root_key in root_keys:
         if event_value == 1:
             ApplyEventOneToAlertList(alert_dictionary_list, root_key, args)
         else:
-            ApplyEventZeroToAlertList(alert_dictionary_list, root_key)
+            ApplyEventZeroToAlertList(alert_dictionary_list, root_key, args)
 
     SaveAlertDictionaryList(args.state_file, alert_dictionary_list)
 
@@ -492,8 +536,6 @@ def GetActionKeys(action_keys):
         action_key = key_part.strip()
         if action_key == "":
             continue
-        if action_key in result:
-            continue
         result.append(action_key)
 
     if len(result) == 0:
@@ -523,6 +565,9 @@ def AddActionTemplateKeysByJsonPath(alert_dictionary_list, json_path, action_key
     for action_key in requested_action_keys:
         if action_key not in ACTION_TEMPLATE_INC:
             raise ValueError("Action template key was not found: {}".format(action_key))
+        if action_key in root_value["action"]:
+            WriteLog("Action key {} already exists for root key {}, nothing changed".format(action_key, root_key), "INFO")
+            continue
         root_value["action"][action_key] = CopyDictionary(ACTION_TEMPLATE_INC[action_key])
         WriteLog("Action key {} added to root key {}".format(action_key, root_key), "INFO")
 
