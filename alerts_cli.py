@@ -24,15 +24,16 @@ ACTION_TEMPLATE_INC = {}
 def GetArgs():
     parser = argparse.ArgumentParser()
     parser.add_argument("mode")
-    parser.add_argument("--event", required=True)
-    parser.add_argument("--insightId", dest="insight_id", required=True)
-    parser.add_argument("--groups", required=True)
-    parser.add_argument("--triggerTime", dest="trigger_time", required=True)
-    parser.add_argument("--trigName", dest="trig_name", required=True)
-    parser.add_argument("--message", required=True)
-    parser.add_argument("--severity", required=True)
+    parser.add_argument("--event")
+    parser.add_argument("--groups")
+    parser.add_argument("--triggerTime", dest="trigger_time")
+    parser.add_argument("--trigName", dest="trig_name")
+    parser.add_argument("--message")
+    parser.add_argument("--severity")
     parser.add_argument("--template", default="inc")
     parser.add_argument("--state-file", dest="state_file", default=STATE_FILE_DEFAULT)
+    parser.add_argument("--path", default="$")
+    parser.add_argument("--key")
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser
 
@@ -141,12 +142,35 @@ def GetActionTemplate(template_name):
     raise ValueError("Unsupported template: {}".format(template_name))
 
 
+def CheckRequiredValue(value, argument_name):
+    if value is None:
+        raise ValueError("Required argument is missing: {}".format(argument_name))
+    if value == "":
+        raise ValueError("Required argument is empty: {}".format(argument_name))
+
+
+def CheckAddArgs(args):
+    CheckRequiredValue(args.event, "--event")
+    CheckRequiredValue(args.groups, "--groups")
+    CheckRequiredValue(args.trigger_time, "--triggerTime")
+    CheckRequiredValue(args.trig_name, "--trigName")
+    CheckRequiredValue(args.message, "--message")
+    CheckRequiredValue(args.severity, "--severity")
+
+
+def CheckSelectArgs(args):
+    CheckRequiredValue(args.path, "--path")
+
+
+def CheckDeleteArgs(args):
+    CheckRequiredValue(args.key, "--key")
+
+
 def CreateEventOneAlertData(args):
     action_template = GetActionTemplate(args.template)
 
     alert_data = {
         "event": "1",
-        "insightId": args.insight_id,
         "groups": args.groups,
         "triggerTime": args.trigger_time,
         "trigName": args.trig_name,
@@ -204,7 +228,116 @@ def ApplyEventZeroToAlertList(alert_dictionary_list, root_key):
     WriteLog("Root key {} decreased, balance is {}".format(root_key, alert_data["balance"]), "INFO")
 
 
+def GetTopLevelValueByKey(alert_dictionary_list, root_key):
+    alert_dictionary = FindAlertDictionaryByRootKey(alert_dictionary_list, root_key)
+    if alert_dictionary is None:
+        raise ValueError("Root key was not found: {}".format(root_key))
+
+    return alert_dictionary[root_key]
+
+
+def GetWildcardValues(current_value):
+    result = []
+
+    if isinstance(current_value, list):
+        for item in current_value:
+            if isinstance(item, dict):
+                for item_key in item:
+                    result.append(item[item_key])
+            else:
+                result.append(item)
+        return result
+
+    if isinstance(current_value, dict):
+        for item_key in current_value:
+            result.append(current_value[item_key])
+        return result
+
+    return result
+
+
+def GetTopLevelKeyFromPathParts(alert_dictionary_list, path_parts):
+    part_count = len(path_parts)
+
+    while part_count > 0:
+        possible_root_key = ".".join(path_parts[0:part_count])
+        alert_dictionary = FindAlertDictionaryByRootKey(alert_dictionary_list, possible_root_key)
+        if alert_dictionary is not None:
+            return possible_root_key, part_count
+        part_count = part_count - 1
+
+    raise ValueError("Root key was not found in JSON path")
+
+
+def SelectValueByJsonPath(alert_dictionary_list, json_path):
+    if json_path == "$":
+        return alert_dictionary_list
+
+    if not json_path.startswith("$."):
+        raise ValueError("JSON path must start with $ or $.")
+
+    path_parts = json_path[2:].split(".")
+    current_value = alert_dictionary_list
+    part_index = 0
+
+    while part_index < len(path_parts):
+        path_part = path_parts[part_index]
+
+        if path_part == "":
+            raise ValueError("JSON path contains an empty part")
+
+        if path_part == "?":
+            current_value = GetWildcardValues(current_value)
+            part_index = part_index + 1
+            continue
+
+        if part_index == 0:
+            root_key, used_parts = GetTopLevelKeyFromPathParts(alert_dictionary_list, path_parts)
+            current_value = GetTopLevelValueByKey(alert_dictionary_list, root_key)
+            part_index = used_parts
+            continue
+
+        if isinstance(current_value, dict):
+            if path_part not in current_value:
+                raise ValueError("JSON path key was not found: {}".format(path_part))
+            current_value = current_value[path_part]
+            part_index = part_index + 1
+            continue
+
+        raise ValueError("JSON path cannot continue after non-dictionary value: {}".format(path_part))
+
+    return current_value
+
+
+def SelectAlertDictionaryList(args):
+    CheckSelectArgs(args)
+    alert_dictionary_list = LoadAlertDictionaryList(args.state_file)
+    selected_value = SelectValueByJsonPath(alert_dictionary_list, args.path)
+
+    print(json.dumps(selected_value, ensure_ascii=False, indent=4))
+
+
+def DeleteAlertDictionaryByRootKey(args):
+    CheckDeleteArgs(args)
+    alert_dictionary_list = LoadAlertDictionaryList(args.state_file)
+    new_alert_dictionary_list = []
+    deleted = False
+
+    for alert_dictionary in alert_dictionary_list:
+        if args.key in alert_dictionary:
+            deleted = True
+            WriteLog("Root key {} deleted".format(args.key), "INFO")
+        else:
+            new_alert_dictionary_list.append(alert_dictionary)
+
+    if not deleted:
+        raise ValueError("Root key was not found: {}".format(args.key))
+
+    SaveAlertDictionaryList(args.state_file, new_alert_dictionary_list)
+
+
 def UpdateAlertDictionaryList(args):
+    CheckAddArgs(args)
     root_keys = ExtractRootKeysFromGroups(args.groups)
 
     if len(root_keys) == 0:
@@ -238,10 +371,14 @@ try:
     WriteLog("Script started in mode {}".format(args.mode), "INFO")
     WriteLog("Selected mode: {}".format(args.mode), "INFO")
 
-    if args.mode != "add":
+    if args.mode == "add":
+        UpdateAlertDictionaryList(args)
+    elif args.mode == "select":
+        SelectAlertDictionaryList(args)
+    elif args.mode == "del":
+        DeleteAlertDictionaryByRootKey(args)
+    else:
         raise ValueError("Unsupported mode: {}".format(args.mode))
-
-    UpdateAlertDictionaryList(args)
 
     WriteLog("Script finished successfully", "INFO")
     sys.exit(0)
