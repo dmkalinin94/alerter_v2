@@ -15,7 +15,19 @@ STATE_FILE_DEFAULT = "/tmp/alerts.json"
 LOG_FILE = "/tmp/alerts.log"
 VERBOSE = False
 GROUP_PATTERN = r"SG/([^,/]+)"
-ACTION_TEMPLATE_INC = {}
+ACTION_TEMPLATE_INC = {
+    "ktalkUserMessage": {
+        "ktalkUsersList": [],
+        "stepSate": "",
+        "errorMessage": "",
+        "retryNumber": ""
+    },
+    "ktalkBot": {
+        "stepSate": "",
+        "errorMessage": "",
+        "retryNumber": ""
+    }
+}
 
 
 ############################### ARGS ###############################
@@ -34,6 +46,8 @@ def GetArgs():
     parser.add_argument("--state-file", dest="state_file", default=STATE_FILE_DEFAULT)
     parser.add_argument("--path", default="$")
     parser.add_argument("--key")
+    parser.add_argument("--data")
+    parser.add_argument("-a", dest="action_keys")
     parser.add_argument("-l", dest="list_key")
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser
@@ -136,9 +150,13 @@ def GetIntegerValue(value, field_name):
         raise ValueError("Invalid integer value for {}: {}".format(field_name, value))
 
 
+def CopyDictionary(source_dictionary):
+    return json.loads(json.dumps(source_dictionary))
+
+
 def GetActionTemplate(template_name):
     if template_name == "inc":
-        return ACTION_TEMPLATE_INC.copy()
+        return CopyDictionary(ACTION_TEMPLATE_INC)
 
     raise ValueError("Unsupported template: {}".format(template_name))
 
@@ -167,6 +185,12 @@ def CheckDeleteArgs(args):
     CheckRequiredValue(args.key, "--key")
 
 
+def CheckUpdateArgs(args):
+    CheckRequiredValue(args.path, "--path")
+    if args.data is None and args.action_keys is None:
+        raise ValueError("Required argument is missing: --data or -a")
+
+
 def CreateEventOneAlertData(args):
     action_template = GetActionTemplate(args.template)
 
@@ -177,7 +201,7 @@ def CreateEventOneAlertData(args):
         "trigName": args.trig_name,
         "message": args.message,
         "severity": args.severity,
-        "action": action_template.copy(),
+        "action": CopyDictionary(action_template),
         "balance": 1
     }
     return alert_data
@@ -401,6 +425,121 @@ def UpdateAlertDictionaryList(args):
     SaveAlertDictionaryList(args.state_file, alert_dictionary_list)
 
 
+def GetPathParts(json_path):
+    if json_path == "$":
+        raise ValueError("JSON path must point to a first-level dictionary or nested key")
+
+    if not json_path.startswith("$."):
+        raise ValueError("JSON path must start with $ or $.")
+
+    path_parts = json_path[2:].split(".")
+    for path_part in path_parts:
+        if path_part == "":
+            raise ValueError("JSON path contains an empty part")
+
+    return path_parts
+
+
+def GetRootKeyAndNestedPath(alert_dictionary_list, json_path):
+    path_parts = GetPathParts(json_path)
+    root_key, used_parts = GetTopLevelKeyFromPathParts(alert_dictionary_list, path_parts)
+    nested_path = path_parts[used_parts:]
+    return root_key, nested_path
+
+
+def GetDictionaryByNestedPath(root_value, nested_path):
+    current_value = root_value
+    part_index = 0
+
+    while part_index < len(nested_path):
+        path_part = nested_path[part_index]
+        if not isinstance(current_value, dict):
+            raise ValueError("JSON path cannot continue after non-dictionary value: {}".format(path_part))
+        if path_part not in current_value:
+            raise ValueError("JSON path key was not found: {}".format(path_part))
+        current_value = current_value[path_part]
+        part_index = part_index + 1
+
+    if not isinstance(current_value, dict):
+        raise ValueError("Selected JSON path value is not a dictionary")
+
+    return current_value
+
+
+def UpdateValueByJsonPath(alert_dictionary_list, json_path, data):
+    root_key, nested_path = GetRootKeyAndNestedPath(alert_dictionary_list, json_path)
+
+    if len(nested_path) == 0:
+        raise ValueError("Update JSON path must point to a nested key")
+
+    root_value = GetTopLevelValueByKey(alert_dictionary_list, root_key)
+    parent_path = nested_path[0:len(nested_path) - 1]
+    update_key = nested_path[len(nested_path) - 1]
+    parent_dictionary = GetDictionaryByNestedPath(root_value, parent_path)
+
+    if update_key not in parent_dictionary:
+        raise ValueError("JSON path key was not found: {}".format(update_key))
+
+    parent_dictionary[update_key] = data
+    WriteLog("JSON path {} updated".format(json_path), "INFO")
+
+
+def GetActionKeys(action_keys):
+    result = []
+    key_parts = action_keys.split(",")
+
+    for key_part in key_parts:
+        action_key = key_part.strip()
+        if action_key == "":
+            continue
+        if action_key in result:
+            continue
+        result.append(action_key)
+
+    if len(result) == 0:
+        raise ValueError("No action keys were provided")
+
+    return result
+
+
+def AddActionTemplateKeysByJsonPath(alert_dictionary_list, json_path, action_keys):
+    root_key, nested_path = GetRootKeyAndNestedPath(alert_dictionary_list, json_path)
+
+    if len(nested_path) != 0:
+        raise ValueError("Action keys can be added only to a first-level dictionary")
+
+    root_value = GetTopLevelValueByKey(alert_dictionary_list, root_key)
+    if not isinstance(root_value, dict):
+        raise ValueError("Selected root value is not a dictionary: {}".format(root_key))
+
+    if "action" not in root_value:
+        root_value["action"] = {}
+
+    if not isinstance(root_value["action"], dict):
+        raise ValueError("Action value is not a dictionary for root key {}".format(root_key))
+
+    requested_action_keys = GetActionKeys(action_keys)
+
+    for action_key in requested_action_keys:
+        if action_key not in ACTION_TEMPLATE_INC:
+            raise ValueError("Action template key was not found: {}".format(action_key))
+        root_value["action"][action_key] = CopyDictionary(ACTION_TEMPLATE_INC[action_key])
+        WriteLog("Action key {} added to root key {}".format(action_key, root_key), "INFO")
+
+
+def UpdateAlertDictionaryValue(args):
+    CheckUpdateArgs(args)
+    alert_dictionary_list = LoadAlertDictionaryList(args.state_file)
+
+    if args.data is not None:
+        UpdateValueByJsonPath(alert_dictionary_list, args.path, args.data)
+
+    if args.action_keys is not None:
+        AddActionTemplateKeysByJsonPath(alert_dictionary_list, args.path, args.action_keys)
+
+    SaveAlertDictionaryList(args.state_file, alert_dictionary_list)
+
+
 ############################### BODY ###############################
 
 
@@ -418,6 +557,8 @@ try:
         SelectAlertDictionaryList(args)
     elif args.mode == "del":
         DeleteAlertDictionaryByRootKey(args)
+    elif args.mode == "update":
+        UpdateAlertDictionaryValue(args)
     else:
         raise ValueError("Unsupported mode: {}".format(args.mode))
 
