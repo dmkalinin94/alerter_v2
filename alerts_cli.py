@@ -208,11 +208,13 @@ def CreateEventOneAlertData(args):
     return alert_data
 
 
-def GetExistingEventBalance(alert_data):
-    if "eventBalance" in alert_data:
-        return GetIntegerValue(alert_data.get("eventBalance"), "eventBalance")
+def RemoveUnusedBalanceKey(alert_data):
+    if "balance" in alert_data:
+        del alert_data["balance"]
 
-    return GetIntegerValue(alert_data.get("balance", 0), "balance")
+
+def GetExistingEventBalance(alert_data):
+    return GetIntegerValue(alert_data.get("eventBalance", 0), "eventBalance")
 
 
 def GetExistingCriticalEventBalance(alert_data):
@@ -239,6 +241,7 @@ def ApplyEventOneToAlertList(alert_dictionary_list, root_key, args):
     if not isinstance(alert_data, dict):
         raise ValueError("Invalid alert data for root key {}".format(root_key))
 
+    RemoveUnusedBalanceKey(alert_data)
     old_event_balance = GetExistingEventBalance(alert_data)
     old_critical_event_balance = GetExistingCriticalEventBalance(alert_data)
     old_severity = alert_data.get("severity", "0")
@@ -274,8 +277,17 @@ def ApplyEventZeroToAlertList(alert_dictionary_list, root_key, args):
     if not isinstance(alert_data, dict):
         raise ValueError("Invalid alert data for root key {}".format(root_key))
 
+    RemoveUnusedBalanceKey(alert_data)
     old_event_balance = GetExistingEventBalance(alert_data)
     old_critical_event_balance = GetExistingCriticalEventBalance(alert_data)
+
+    if old_event_balance == 0:
+        WriteLog("Event balance is already zero for root key {}, nothing changed".format(root_key), "ERROR")
+        return
+
+    if severity_value == 5 and old_critical_event_balance == 0:
+        WriteLog("Critical event balance is already zero for root key {}, nothing changed".format(root_key), "ERROR")
+        return
 
     alert_data["eventBalance"] = old_event_balance - 1
     if severity_value == 5:
