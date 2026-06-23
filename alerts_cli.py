@@ -34,6 +34,7 @@ def GetArgs():
     parser.add_argument("--state-file", dest="state_file", default=STATE_FILE_DEFAULT)
     parser.add_argument("--path", default="$")
     parser.add_argument("--key")
+    parser.add_argument("-l", dest="list_key")
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser
 
@@ -309,10 +310,50 @@ def SelectValueByJsonPath(alert_dictionary_list, json_path):
     return current_value
 
 
+def GetRootKeysForListOutput(alert_dictionary_list, json_path):
+    root_keys = []
+
+    if json_path == "$" or json_path == "$.?":
+        for alert_dictionary in alert_dictionary_list:
+            for root_key in alert_dictionary:
+                root_keys.append(root_key)
+        return root_keys
+
+    if not json_path.startswith("$."):
+        raise ValueError("JSON path must start with $ or $.")
+
+    path_parts = json_path[2:].split(".")
+    root_key, used_parts = GetTopLevelKeyFromPathParts(alert_dictionary_list, path_parts)
+
+    if used_parts != len(path_parts):
+        raise ValueError("List output path must point to a first-level dictionary")
+
+    root_keys.append(root_key)
+    return root_keys
+
+
+def SelectListValuesByKey(alert_dictionary_list, json_path, list_key):
+    result = {}
+    root_keys = GetRootKeysForListOutput(alert_dictionary_list, json_path)
+
+    for root_key in root_keys:
+        selected_value = GetTopLevelValueByKey(alert_dictionary_list, root_key)
+        if not isinstance(selected_value, dict):
+            raise ValueError("Selected root value is not a dictionary: {}".format(root_key))
+        if list_key not in selected_value:
+            raise ValueError("List key was not found for root key {}: {}".format(root_key, list_key))
+        result[root_key] = selected_value[list_key]
+
+    return result
+
+
 def SelectAlertDictionaryList(args):
     CheckSelectArgs(args)
     alert_dictionary_list = LoadAlertDictionaryList(args.state_file)
-    selected_value = SelectValueByJsonPath(alert_dictionary_list, args.path)
+    if args.list_key is not None:
+        selected_value = SelectListValuesByKey(alert_dictionary_list, args.path, args.list_key)
+    else:
+        selected_value = SelectValueByJsonPath(alert_dictionary_list, args.path)
 
     print(json.dumps(selected_value, ensure_ascii=False, indent=4))
 
