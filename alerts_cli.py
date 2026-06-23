@@ -1,140 +1,250 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import argparse
-import copy
+import datetime
 import json
-import logging
 import os
+import re
 import sys
 
-from cnf import ALERTS_FILE
-from cnf import LOG_FILE
-from cnf import IncTemplate
+
+############################### VARS ###############################
+
+STATE_FILE_DEFAULT = "/tmp/alerts.json"
+LOG_FILE = "/tmp/alerts.log"
+VERBOSE = False
+GROUP_PATTERN = r"SG/([^,/]+)"
+ACTION_TEMPLATE_INC = {}
 
 
-# Настройка аргументов командной строки.
-parser = argparse.ArgumentParser()
-parser.add_argument(
-    "-v",
-    "--verbose",
-    action="store_true"
-)
-parser.add_argument(
-    "mode",
-    choices=["add", "get"]
-)
-parser.add_argument(
-    "--event",
-    default=""
-)
-parser.add_argument(
-    "--tags",
-    default=""
-)
-parser.add_argument(
-    "--severity",
-    default=""
-)
-parser.add_argument(
-    "--insightId",
-    default=""
-)
-parser.add_argument(
-    "--groups",
-    default=""
-)
-parser.add_argument(
-    "--triggerTime",
-    default=""
-)
-parser.add_argument(
-    "--trigName",
-    default=""
-)
-parser.add_argument(
-    "--message",
-    default=""
-)
-parser.add_argument(
-    "--timestamp",
-    default=""
-)
-args = parser.parse_args()
+############################### ARGS ###############################
 
-# Настройка логирования в файл и, при необходимости, в stdout.
-logging.basicConfig(
-    filename=LOG_FILE,
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
-    encoding="utf-8"
-)
-logger = logging.getLogger("alerts_cli")
 
-if args.verbose:
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
-    console_formatter = logging.Formatter("%(levelname)s: %(message)s")
-    console_handler.setFormatter(console_formatter)
-    logger.addHandler(console_handler)
+def GetArgs():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("mode")
+    parser.add_argument("--event", required=True)
+    parser.add_argument("--insightId", dest="insight_id", required=True)
+    parser.add_argument("--groups", required=True)
+    parser.add_argument("--triggerTime", dest="trigger_time", required=True)
+    parser.add_argument("--trigName", dest="trig_name", required=True)
+    parser.add_argument("--message", required=True)
+    parser.add_argument("--severity", required=True)
+    parser.add_argument("--template", default="inc")
+    parser.add_argument("--state-file", dest="state_file", default=STATE_FILE_DEFAULT)
+    parser.add_argument("-v", "--verbose", action="store_true")
+    return parser
 
-try:
-    logger.info("Запуск скрипта. Режим: " + args.mode)
 
-    # Создание файла хранилища, если он отсутствует.
-    if not os.path.exists(ALERTS_FILE):
-        file = open(ALERTS_FILE, "w", encoding="utf-8")
-        json.dump([], file, ensure_ascii=False, indent=4)
-        file.close()
-        logger.info("Файл хранилища создан: " + ALERTS_FILE)
+############################### LOGS ###############################
 
-    # Чтение текущего содержимого хранилища.
-    file = open(ALERTS_FILE, "r", encoding="utf-8")
-    alerts = json.load(file)
+
+def WriteLog(message, level):
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_message = "{} [{}] {}".format(now, level, message)
+
+    file = open(LOG_FILE, "a", encoding="utf-8")
+    file.write(log_message + "\n")
     file.close()
 
-    # Проверка корневого типа JSON.
-    if type(alerts) != list:
-        error_message = "Ошибка: корневой объект JSON должен быть списком. Файл: " + ALERTS_FILE
-        logger.error(error_message)
-        print(error_message, file=sys.stderr)
-        sys.exit(1)
+    if VERBOSE:
+        print(log_message)
 
-    # Режим добавления нового объекта.
-    if args.mode == "add":
-        new_object = copy.deepcopy(IncTemplate[0])
 
-        new_object["event"] = args.event
-        new_object["tags"] = args.tags
-        new_object["severity"] = args.severity
-        new_object["insightId"] = args.insightId
-        new_object["groups"] = args.groups
-        new_object["triggerTime"] = args.triggerTime
-        new_object["trigName"] = args.trigName
-        new_object["message"] = args.message
-        new_object["timestamp"] = args.timestamp
+############################### FUNCTIONS ###############################
 
-        alerts.append(new_object)
 
-        file = open(ALERTS_FILE, "w", encoding="utf-8")
-        json.dump(alerts, file, ensure_ascii=False, indent=4)
+def ExtractRootKeysFromGroups(groups):
+    matches = re.findall(GROUP_PATTERN, groups)
+    root_keys = []
+
+    for match in matches:
+        root_key = match.strip()
+        if root_key == "":
+            continue
+        if root_key in root_keys:
+            continue
+        root_keys.append(root_key)
+
+    return root_keys
+
+
+def LoadAlertDictionaryList(state_file):
+    if not os.path.exists(state_file):
+        WriteLog("State file does not exist, a new one will be created: {}".format(state_file), "INFO")
+        return []
+
+    try:
+        file = open(state_file, "r", encoding="utf-8")
+        content = file.read()
         file.close()
+    except OSError as error:
+        WriteLog("Failed to read state file {}: {}".format(state_file, error), "ERROR")
+        raise
 
-        logger.info(
-            "Объект добавлен. insightId: " + args.insightId + ". Всего объектов: " + str(len(alerts))
+    if content.strip() == "":
+        return []
+
+    try:
+        alert_dictionary_list = json.loads(content)
+    except ValueError as error:
+        WriteLog("Failed to parse state file {}: {}".format(state_file, error), "ERROR")
+        raise
+
+    if not isinstance(alert_dictionary_list, list):
+        raise ValueError("Invalid state structure: root element must be a list")
+
+    for alert_dictionary in alert_dictionary_list:
+        if not isinstance(alert_dictionary, dict):
+            raise ValueError("Invalid state structure: each list item must be a dictionary")
+
+    return alert_dictionary_list
+
+
+def SaveAlertDictionaryList(state_file, alert_dictionary_list):
+    try:
+        file = open(state_file, "w", encoding="utf-8")
+        json.dump(
+            alert_dictionary_list,
+            file,
+            ensure_ascii=False,
+            indent=4
         )
-        sys.exit(0)
+        file.write("\n")
+        file.close()
+    except OSError as error:
+        WriteLog("Failed to write state file {}: {}".format(state_file, error), "ERROR")
+        raise
 
-    # Режим вывода всех объектов.
-    if args.mode == "get":
-        print(
-            json.dumps(
-                alerts,
-                ensure_ascii=False,
-                indent=4
-            )
-        )
-        sys.exit(0)
+    WriteLog("State saved to {}".format(state_file), "INFO")
 
-except (OSError, ValueError, IndexError, TypeError, KeyError) as error:
-    error_message = "Ошибка выполнения: " + str(error)
-    logger.error(error_message)
-    print(error_message, file=sys.stderr)
+
+def FindAlertDictionaryByRootKey(alert_dictionary_list, root_key):
+    for alert_dictionary in alert_dictionary_list:
+        if root_key in alert_dictionary:
+            return alert_dictionary
+    return None
+
+
+def GetIntegerValue(value, field_name):
+    try:
+        return int(value)
+    except ValueError:
+        raise ValueError("Invalid integer value for {}: {}".format(field_name, value))
+
+
+def GetActionTemplate(template_name):
+    if template_name == "inc":
+        return ACTION_TEMPLATE_INC.copy()
+
+    raise ValueError("Unsupported template: {}".format(template_name))
+
+
+def CreateEventOneAlertData(args):
+    action_template = GetActionTemplate(args.template)
+
+    alert_data = {
+        "event": "1",
+        "insightId": args.insight_id,
+        "groups": args.groups,
+        "triggerTime": args.trigger_time,
+        "trigName": args.trig_name,
+        "message": args.message,
+        "severity": args.severity,
+        "action": action_template.copy(),
+        "balance": 1
+    }
+    return alert_data
+
+
+def ApplyEventOneToAlertList(alert_dictionary_list, root_key, args):
+    alert_dictionary = FindAlertDictionaryByRootKey(alert_dictionary_list, root_key)
+    new_severity = GetIntegerValue(args.severity, "severity")
+
+    if alert_dictionary is None:
+        alert_data = CreateEventOneAlertData(args)
+        alert_dictionary_list.append({root_key: alert_data.copy()})
+        WriteLog("Root key {} added with balance 1".format(root_key), "INFO")
+        return
+
+    alert_data = alert_dictionary[root_key]
+    if not isinstance(alert_data, dict):
+        raise ValueError("Invalid alert data for root key {}".format(root_key))
+
+    old_balance = alert_data.get("balance", 0)
+    old_balance = GetIntegerValue(old_balance, "balance")
+    old_severity = alert_data.get("severity", "0")
+    old_severity = GetIntegerValue(old_severity, "severity")
+
+    alert_data["balance"] = old_balance + 1
+    if "action" not in alert_data:
+        alert_data["action"] = GetActionTemplate(args.template)
+    if new_severity > old_severity:
+        alert_data["severity"] = args.severity
+
+    WriteLog("Root key {} updated, balance is {}".format(root_key, alert_data["balance"]), "INFO")
+
+
+def ApplyEventZeroToAlertList(alert_dictionary_list, root_key):
+    alert_dictionary = FindAlertDictionaryByRootKey(alert_dictionary_list, root_key)
+
+    if alert_dictionary is None:
+        WriteLog("Root key {} was not found for event 0, nothing changed".format(root_key), "INFO")
+        return
+
+    alert_data = alert_dictionary[root_key]
+    if not isinstance(alert_data, dict):
+        raise ValueError("Invalid alert data for root key {}".format(root_key))
+
+    old_balance = alert_data.get("balance", 0)
+    old_balance = GetIntegerValue(old_balance, "balance")
+    alert_data["balance"] = old_balance - 1
+
+    WriteLog("Root key {} decreased, balance is {}".format(root_key, alert_data["balance"]), "INFO")
+
+
+def UpdateAlertDictionaryList(args):
+    root_keys = ExtractRootKeysFromGroups(args.groups)
+
+    if len(root_keys) == 0:
+        raise ValueError("No groups starting with SG/ were found")
+
+    WriteLog("Extracted root keys: {}".format(", ".join(root_keys)), "INFO")
+
+    event_value = GetIntegerValue(args.event, "event")
+    if event_value != 0 and event_value != 1:
+        raise ValueError("Unsupported event value: {}".format(args.event))
+
+    alert_dictionary_list = LoadAlertDictionaryList(args.state_file)
+
+    for root_key in root_keys:
+        if event_value == 1:
+            ApplyEventOneToAlertList(alert_dictionary_list, root_key, args)
+        else:
+            ApplyEventZeroToAlertList(alert_dictionary_list, root_key)
+
+    SaveAlertDictionaryList(args.state_file, alert_dictionary_list)
+
+
+############################### BODY ###############################
+
+
+parser = GetArgs()
+args = parser.parse_args()
+VERBOSE = args.verbose
+
+try:
+    WriteLog("Script started in mode {}".format(args.mode), "INFO")
+    WriteLog("Selected mode: {}".format(args.mode), "INFO")
+
+    if args.mode != "add":
+        raise ValueError("Unsupported mode: {}".format(args.mode))
+
+    UpdateAlertDictionaryList(args)
+
+    WriteLog("Script finished successfully", "INFO")
+    sys.exit(0)
+except Exception as error:
+    WriteLog("Execution failed: {}".format(error), "ERROR")
     sys.exit(1)
