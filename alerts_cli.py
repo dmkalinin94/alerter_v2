@@ -9,6 +9,8 @@ import re
 import sys
 
 
+############################### VARS ###############################
+
 STATE_FILE_DEFAULT = "/tmp/alerts.json"
 LOG_FILE = "/tmp/alerts.log"
 VERBOSE = False
@@ -16,7 +18,29 @@ GROUP_PATTERN = r"SG/([^,/]+)"
 ACTION_TEMPLATE_INC = {}
 
 
-def write_log(message, level):
+############################### ARGS ###############################
+
+
+def GetArgs():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("mode")
+    parser.add_argument("--event", required=True)
+    parser.add_argument("--insightId", dest="insight_id", required=True)
+    parser.add_argument("--groups", required=True)
+    parser.add_argument("--triggerTime", dest="trigger_time", required=True)
+    parser.add_argument("--trigName", dest="trig_name", required=True)
+    parser.add_argument("--message", required=True)
+    parser.add_argument("--severity", required=True)
+    parser.add_argument("--template", default="inc")
+    parser.add_argument("--state-file", dest="state_file", default=STATE_FILE_DEFAULT)
+    parser.add_argument("-v", "--verbose", action="store_true")
+    return parser
+
+
+############################### LOGS ###############################
+
+
+def WriteLog(message, level):
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     log_message = "{} [{}] {}".format(now, level, message)
 
@@ -28,7 +52,10 @@ def write_log(message, level):
         print(log_message)
 
 
-def extract_root_keys_from_groups(groups):
+############################### FUNCTIONS ###############################
+
+
+def ExtractRootKeysFromGroups(groups):
     matches = re.findall(GROUP_PATTERN, groups)
     root_keys = []
 
@@ -43,9 +70,9 @@ def extract_root_keys_from_groups(groups):
     return root_keys
 
 
-def load_alert_dictionary_list(state_file):
+def LoadAlertDictionaryList(state_file):
     if not os.path.exists(state_file):
-        write_log("State file does not exist, a new one will be created: {}".format(state_file), "INFO")
+        WriteLog("State file does not exist, a new one will be created: {}".format(state_file), "INFO")
         return []
 
     try:
@@ -53,7 +80,7 @@ def load_alert_dictionary_list(state_file):
         content = file.read()
         file.close()
     except OSError as error:
-        write_log("Failed to read state file {}: {}".format(state_file, error), "ERROR")
+        WriteLog("Failed to read state file {}: {}".format(state_file, error), "ERROR")
         raise
 
     if content.strip() == "":
@@ -62,7 +89,7 @@ def load_alert_dictionary_list(state_file):
     try:
         alert_dictionary_list = json.loads(content)
     except ValueError as error:
-        write_log("Failed to parse state file {}: {}".format(state_file, error), "ERROR")
+        WriteLog("Failed to parse state file {}: {}".format(state_file, error), "ERROR")
         raise
 
     if not isinstance(alert_dictionary_list, list):
@@ -75,7 +102,7 @@ def load_alert_dictionary_list(state_file):
     return alert_dictionary_list
 
 
-def save_alert_dictionary_list(state_file, alert_dictionary_list):
+def SaveAlertDictionaryList(state_file, alert_dictionary_list):
     try:
         file = open(state_file, "w", encoding="utf-8")
         json.dump(
@@ -87,35 +114,35 @@ def save_alert_dictionary_list(state_file, alert_dictionary_list):
         file.write("\n")
         file.close()
     except OSError as error:
-        write_log("Failed to write state file {}: {}".format(state_file, error), "ERROR")
+        WriteLog("Failed to write state file {}: {}".format(state_file, error), "ERROR")
         raise
 
-    write_log("State saved to {}".format(state_file), "INFO")
+    WriteLog("State saved to {}".format(state_file), "INFO")
 
 
-def find_alert_dictionary_by_root_key(alert_dictionary_list, root_key):
+def FindAlertDictionaryByRootKey(alert_dictionary_list, root_key):
     for alert_dictionary in alert_dictionary_list:
         if root_key in alert_dictionary:
             return alert_dictionary
     return None
 
 
-def get_integer_value(value, field_name):
+def GetIntegerValue(value, field_name):
     try:
         return int(value)
     except ValueError:
         raise ValueError("Invalid integer value for {}: {}".format(field_name, value))
 
 
-def get_action_template(template_name):
+def GetActionTemplate(template_name):
     if template_name == "inc":
         return ACTION_TEMPLATE_INC.copy()
 
     raise ValueError("Unsupported template: {}".format(template_name))
 
 
-def create_event_one_alert_data(args):
-    action_template = get_action_template(args.template)
+def CreateEventOneAlertData(args):
+    action_template = GetActionTemplate(args.template)
 
     alert_data = {
         "event": "1",
@@ -131,14 +158,14 @@ def create_event_one_alert_data(args):
     return alert_data
 
 
-def apply_event_one_to_alert_list(alert_dictionary_list, root_key, args):
-    alert_dictionary = find_alert_dictionary_by_root_key(alert_dictionary_list, root_key)
-    new_severity = get_integer_value(args.severity, "severity")
+def ApplyEventOneToAlertList(alert_dictionary_list, root_key, args):
+    alert_dictionary = FindAlertDictionaryByRootKey(alert_dictionary_list, root_key)
+    new_severity = GetIntegerValue(args.severity, "severity")
 
     if alert_dictionary is None:
-        alert_data = create_event_one_alert_data(args)
+        alert_data = CreateEventOneAlertData(args)
         alert_dictionary_list.append({root_key: alert_data.copy()})
-        write_log("Root key {} added with balance 1".format(root_key), "INFO")
+        WriteLog("Root key {} added with balance 1".format(root_key), "INFO")
         return
 
     alert_data = alert_dictionary[root_key]
@@ -146,24 +173,24 @@ def apply_event_one_to_alert_list(alert_dictionary_list, root_key, args):
         raise ValueError("Invalid alert data for root key {}".format(root_key))
 
     old_balance = alert_data.get("balance", 0)
-    old_balance = get_integer_value(old_balance, "balance")
+    old_balance = GetIntegerValue(old_balance, "balance")
     old_severity = alert_data.get("severity", "0")
-    old_severity = get_integer_value(old_severity, "severity")
+    old_severity = GetIntegerValue(old_severity, "severity")
 
     alert_data["balance"] = old_balance + 1
     if "action" not in alert_data:
-        alert_data["action"] = get_action_template(args.template)
+        alert_data["action"] = GetActionTemplate(args.template)
     if new_severity > old_severity:
         alert_data["severity"] = args.severity
 
-    write_log("Root key {} updated, balance is {}".format(root_key, alert_data["balance"]), "INFO")
+    WriteLog("Root key {} updated, balance is {}".format(root_key, alert_data["balance"]), "INFO")
 
 
-def apply_event_zero_to_alert_list(alert_dictionary_list, root_key):
-    alert_dictionary = find_alert_dictionary_by_root_key(alert_dictionary_list, root_key)
+def ApplyEventZeroToAlertList(alert_dictionary_list, root_key):
+    alert_dictionary = FindAlertDictionaryByRootKey(alert_dictionary_list, root_key)
 
     if alert_dictionary is None:
-        write_log("Root key {} was not found for event 0, nothing changed".format(root_key), "INFO")
+        WriteLog("Root key {} was not found for event 0, nothing changed".format(root_key), "INFO")
         return
 
     alert_data = alert_dictionary[root_key]
@@ -171,91 +198,53 @@ def apply_event_zero_to_alert_list(alert_dictionary_list, root_key):
         raise ValueError("Invalid alert data for root key {}".format(root_key))
 
     old_balance = alert_data.get("balance", 0)
-    old_balance = get_integer_value(old_balance, "balance")
+    old_balance = GetIntegerValue(old_balance, "balance")
     alert_data["balance"] = old_balance - 1
 
-    write_log("Root key {} decreased, balance is {}".format(root_key, alert_data["balance"]), "INFO")
+    WriteLog("Root key {} decreased, balance is {}".format(root_key, alert_data["balance"]), "INFO")
 
 
-def update_alert_dictionary_list(args):
-    root_keys = extract_root_keys_from_groups(args.groups)
+def UpdateAlertDictionaryList(args):
+    root_keys = ExtractRootKeysFromGroups(args.groups)
 
     if len(root_keys) == 0:
         raise ValueError("No groups starting with SG/ were found")
 
-    write_log("Extracted root keys: {}".format(", ".join(root_keys)), "INFO")
+    WriteLog("Extracted root keys: {}".format(", ".join(root_keys)), "INFO")
 
-    event_value = get_integer_value(args.event, "event")
+    event_value = GetIntegerValue(args.event, "event")
     if event_value != 0 and event_value != 1:
         raise ValueError("Unsupported event value: {}".format(args.event))
 
-    alert_dictionary_list = load_alert_dictionary_list(args.state_file)
+    alert_dictionary_list = LoadAlertDictionaryList(args.state_file)
 
     for root_key in root_keys:
         if event_value == 1:
-            apply_event_one_to_alert_list(alert_dictionary_list, root_key, args)
+            ApplyEventOneToAlertList(alert_dictionary_list, root_key, args)
         else:
-            apply_event_zero_to_alert_list(alert_dictionary_list, root_key)
+            ApplyEventZeroToAlertList(alert_dictionary_list, root_key)
 
-    save_alert_dictionary_list(args.state_file, alert_dictionary_list)
-
-
-def create_parser():
-    parser = argparse.ArgumentParser(
-        description="Простой CLI-контроллер JSON-состояния алертов Zabbix.",
-        epilog=(
-            "Пример launch.json args для VS Code:\n"
-            "[\n"
-            "  \"add\",\n"
-            "  \"--event=1\",\n"
-            "  \"--insightId=TZ-121\",\n"
-            "  \"--groups=AVAIL, SG/S.AXR, TMP, SG/S.prodss/sd\",\n"
-            "  \"--triggerTime=2026.01.22 07:49:32\",\n"
-            "  \"--trigName=Trig Name\",\n"
-            "  \"--message=message message2\",\n"
-            "  \"--severity=1\",\n"
-            "  \"--template=inc\",\n"
-            "  \"-v\"\n"
-            "]"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    parser.add_argument("mode")
-    parser.add_argument("--event", required=True)
-    parser.add_argument("--insightId", dest="insight_id", required=True)
-    parser.add_argument("--groups", required=True)
-    parser.add_argument("--triggerTime", dest="trigger_time", required=True)
-    parser.add_argument("--trigName", dest="trig_name", required=True)
-    parser.add_argument("--message", required=True)
-    parser.add_argument("--severity", required=True)
-    parser.add_argument("--template", default="inc")
-    parser.add_argument("--state-file", dest="state_file", default=STATE_FILE_DEFAULT)
-    parser.add_argument("-v", "--verbose", action="store_true")
-    return parser
+    SaveAlertDictionaryList(args.state_file, alert_dictionary_list)
 
 
-def main():
-    global VERBOSE
-
-    parser = create_parser()
-    args = parser.parse_args()
-    VERBOSE = args.verbose
-
-    try:
-        write_log("Script started in mode {}".format(args.mode), "INFO")
-        write_log("Selected mode: {}".format(args.mode), "INFO")
-
-        if args.mode != "add":
-            raise ValueError("Unsupported mode: {}".format(args.mode))
-
-        update_alert_dictionary_list(args)
-
-        write_log("Script finished successfully", "INFO")
-        sys.exit(0)
-    except Exception as error:
-        write_log("Execution failed: {}".format(error), "ERROR")
-        sys.exit(1)
+############################### BODY ###############################
 
 
-if __name__ == "__main__":
-    main()
+parser = GetArgs()
+args = parser.parse_args()
+VERBOSE = args.verbose
+
+try:
+    WriteLog("Script started in mode {}".format(args.mode), "INFO")
+    WriteLog("Selected mode: {}".format(args.mode), "INFO")
+
+    if args.mode != "add":
+        raise ValueError("Unsupported mode: {}".format(args.mode))
+
+    UpdateAlertDictionaryList(args)
+
+    WriteLog("Script finished successfully", "INFO")
+    sys.exit(0)
+except Exception as error:
+    WriteLog("Execution failed: {}".format(error), "ERROR")
+    sys.exit(1)
