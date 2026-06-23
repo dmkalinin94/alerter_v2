@@ -13,6 +13,7 @@ STATE_FILE_DEFAULT = "/tmp/alerts.json"
 LOG_FILE = "/tmp/alerts.log"
 VERBOSE = False
 GROUP_PATTERN = r"SG/([^,/]+)"
+ACTION_TEMPLATE_INC = {}
 
 
 def write_log(message, level):
@@ -106,7 +107,16 @@ def get_integer_value(value, field_name):
         raise ValueError("Invalid integer value for {}: {}".format(field_name, value))
 
 
+def get_action_template(template_name):
+    if template_name == "inc":
+        return ACTION_TEMPLATE_INC.copy()
+
+    raise ValueError("Unsupported template: {}".format(template_name))
+
+
 def create_event_one_alert_data(args):
+    action_template = get_action_template(args.template)
+
     alert_data = {
         "event": "1",
         "insightId": args.insight_id,
@@ -115,6 +125,7 @@ def create_event_one_alert_data(args):
         "trigName": args.trig_name,
         "message": args.message,
         "severity": args.severity,
+        "action": action_template.copy(),
         "balance": 1
     }
     return alert_data
@@ -140,6 +151,8 @@ def apply_event_one_to_alert_list(alert_dictionary_list, root_key, args):
     old_severity = get_integer_value(old_severity, "severity")
 
     alert_data["balance"] = old_balance + 1
+    if "action" not in alert_data:
+        alert_data["action"] = get_action_template(args.template)
     if new_severity > old_severity:
         alert_data["severity"] = args.severity
 
@@ -188,7 +201,25 @@ def update_alert_dictionary_list(args):
 
 
 def create_parser():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Простой CLI-контроллер JSON-состояния алертов Zabbix.",
+        epilog=(
+            "Пример launch.json args для VS Code:\n"
+            "[\n"
+            "  \"add\",\n"
+            "  \"--event=1\",\n"
+            "  \"--insightId=TZ-121\",\n"
+            "  \"--groups=AVAIL, SG/S.AXR, TMP, SG/S.prodss/sd\",\n"
+            "  \"--triggerTime=2026.01.22 07:49:32\",\n"
+            "  \"--trigName=Trig Name\",\n"
+            "  \"--message=message message2\",\n"
+            "  \"--severity=1\",\n"
+            "  \"--template=inc\",\n"
+            "  \"-v\"\n"
+            "]"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("mode")
     parser.add_argument("--event", required=True)
     parser.add_argument("--insightId", dest="insight_id", required=True)
@@ -197,6 +228,7 @@ def create_parser():
     parser.add_argument("--trigName", dest="trig_name", required=True)
     parser.add_argument("--message", required=True)
     parser.add_argument("--severity", required=True)
+    parser.add_argument("--template", default="inc")
     parser.add_argument("--state-file", dest="state_file", default=STATE_FILE_DEFAULT)
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser
