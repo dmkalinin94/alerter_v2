@@ -3,6 +3,7 @@
 
 import argparse
 import datetime
+import fcntl
 import json
 import os
 import re
@@ -69,6 +70,32 @@ def WriteLog(message, level):
 
 
 ############################### FUNCTIONS ###############################
+
+
+def OpenStateFileLock(state_file):
+    try:
+        lock_file = open(state_file, "a+", encoding="utf-8")
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+    except OSError as error:
+        WriteLog("Failed to lock state file {}: {}".format(state_file, error), "ERROR")
+        raise
+
+    WriteLog("State file locked: {}".format(state_file), "INFO")
+    return lock_file
+
+
+def CloseStateFileLock(lock_file, state_file):
+    if lock_file is None:
+        return
+
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
+        lock_file.close()
+    except OSError as error:
+        WriteLog("Failed to unlock state file {}: {}".format(state_file, error), "ERROR")
+        raise
+
+    WriteLog("State file unlocked: {}".format(state_file), "INFO")
 
 
 def ExtractRootKeysFromGroups(groups):
@@ -604,9 +631,13 @@ parser = GetArgs()
 args = parser.parse_args()
 VERBOSE = args.verbose
 
+lock_file = None
+
 try:
     WriteLog("Script started in mode {}".format(args.mode), "INFO")
     WriteLog("Selected mode: {}".format(args.mode), "INFO")
+
+    lock_file = OpenStateFileLock(args.state_file)
 
     if args.mode == "add":
         UpdateAlertDictionaryList(args)
@@ -619,8 +650,15 @@ try:
     else:
         raise ValueError("Unsupported mode: {}".format(args.mode))
 
+    CloseStateFileLock(lock_file, args.state_file)
+    lock_file = None
+
     WriteLog("Script finished successfully", "INFO")
     sys.exit(0)
 except Exception as error:
+    try:
+        CloseStateFileLock(lock_file, args.state_file)
+    except Exception as unlock_error:
+        WriteLog("Execution failed while unlocking: {}".format(unlock_error), "ERROR")
     WriteLog("Execution failed: {}".format(error), "ERROR")
     sys.exit(1)
