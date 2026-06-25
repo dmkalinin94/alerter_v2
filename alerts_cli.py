@@ -230,7 +230,8 @@ def CreateEventOneAlertData(args):
         "severity": args.severity,
         "action": CopyDictionary(action_template),
         "eventBalance": 1,
-        "criticalEventBalance": 0
+        "criticalEventBalance": 0,
+        "zeroBalanceTime": ""
     }
     return alert_data
 
@@ -275,6 +276,7 @@ def ApplyEventOneToAlertList(alert_dictionary_list, root_key, args):
     old_severity = GetIntegerValue(old_severity, "severity")
 
     alert_data["eventBalance"] = old_event_balance + 1
+    alert_data["zeroBalanceTime"] = ""
     if new_severity == 5:
         alert_data["criticalEventBalance"] = old_critical_event_balance + 1
     else:
@@ -317,6 +319,9 @@ def ApplyEventZeroToAlertList(alert_dictionary_list, root_key, args):
         return
 
     alert_data["eventBalance"] = old_event_balance - 1
+    if alert_data["eventBalance"] == 0:
+        alert_data["zeroBalanceTime"] = args.trigger_time
+
     if severity_value == 5:
         alert_data["criticalEventBalance"] = old_critical_event_balance - 1
     else:
