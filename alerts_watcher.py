@@ -23,42 +23,6 @@ DATETIME_FORMAT = "%Y.%m.%d %H:%M:%S"
 
 DEFAULT_DELETE_DELAY_MINUTES = 30
 
-SEVERITY_ACTION = {
-    "0": [
-        "ktalkUserMessage"
-    ],
-    "1": [
-        "ktalkUserMessage",
-        "InsightActiv"
-    ],
-    "2": [
-        "ktalkUserMessage",
-        "InsightActiv",
-        "ktalkBot",
-        "InsightID"
-    ],
-    "3": [
-        "ktalkUserMessage",
-        "InsightActiv",
-        "ktalkBot",
-        "InsightID"
-    ],
-    "4": [
-        "ktalkUserMessage",
-        "InsightActiv",
-        "ktalkBot",
-        "InsightID",
-        "InsightRecepients"
-    ],
-    "5": [
-        "ktalkUserMessage",
-        "InsightActiv",
-        "ktalkBot",
-        "InsightID",
-        "InsightRecepients",
-        "jiraINC"
-    ]
-}
 
 DELETE_CONDITIONS = [
     {
@@ -176,50 +140,7 @@ def LoadAlertPackages(args):
     return alert_dictionary_list
 
 
-def GetSeverityActions(severity_value):
-    if severity_value is None:
-        WriteLog("Severity is missing", "ERROR")
-        return None
-
-    severity_key = str(severity_value)
-    WriteLog("Package severity: {}".format(severity_key), "INFO")
-
-    if severity_key not in SEVERITY_ACTION:
-        WriteLog("Unknown severity: {}".format(severity_key), "ERROR")
-        return None
-
-    return SEVERITY_ACTION[severity_key]
-
-
-def GetMissingActions(alert_data, required_actions):
-    action_value = alert_data.get("action", {})
-    if action_value is None:
-        action_value = {}
-
-    if not isinstance(action_value, dict):
-        WriteLog("Action value is not a dictionary", "ERROR")
-        return None
-
-    existing_actions = []
-    for action_key in action_value:
-        existing_actions.append(action_key)
-
-    missing_actions = []
-    for action_key in required_actions:
-        if action_key not in action_value:
-            missing_actions.append(action_key)
-
-    WriteLog("Existing actions: {}".format(", ".join(existing_actions)), "INFO")
-    WriteLog("Missing actions: {}".format(", ".join(missing_actions)), "INFO")
-    return missing_actions
-
-
-def AddMissingActions(args, root_key, missing_actions):
-    if len(missing_actions) == 0:
-        WriteLog("No missing actions for root key {}".format(root_key), "INFO")
-        return True
-
-    action_argument = ",".join(missing_actions)
+def AddSeverityActions(args, root_key):
     command = [
         sys.executable,
         args.cli_path,
@@ -228,20 +149,29 @@ def AddMissingActions(args, root_key, missing_actions):
         args.state_file,
         "--path",
         "$." + root_key,
-        "-a",
-        action_argument
+        "--severity-actions"
     ]
     result = RunCliCommand(command)
 
     if result.returncode != 0:
-        WriteLog("Failed to add actions for root key {}".format(root_key), "ERROR")
+        WriteLog("Failed to add severity actions for root key {}".format(root_key), "ERROR")
         WriteLog("CLI update return code: {}".format(result.returncode), "ERROR")
         WriteLog("CLI update stderr: {}".format(result.stderr.strip()), "ERROR")
         WriteLog("CLI update stdout: {}".format(result.stdout.strip()), "ERROR")
         return False
 
-    WriteLog("Added actions for root key {}: {}".format(root_key, action_argument), "INFO")
-    return True
+    try:
+        result_data = json.loads(result.stdout)
+    except ValueError:
+        result_data = {}
+
+    added_actions = result_data.get("added", [])
+    if len(added_actions) == 0:
+        WriteLog("No severity actions were added for root key {}".format(root_key), "INFO")
+    else:
+        WriteLog("Added severity actions for root key {}: {}".format(root_key, ", ".join(added_actions)), "INFO")
+
+    return True, len(added_actions)
 
 
 def CheckDeleteCondition(alert_data, condition):
@@ -420,21 +350,13 @@ def ProcessPackage(args, root_key, alert_data, counters):
         counters["errors"] = counters["errors"] + 1
         return
 
-    required_actions = GetSeverityActions(alert_data.get("severity"))
-    if required_actions is None:
+    severity_actions_result = AddSeverityActions(args, root_key)
+    if not severity_actions_result:
         counters["errors"] = counters["errors"] + 1
         return
 
-    missing_actions = GetMissingActions(alert_data, required_actions)
-    if missing_actions is None:
-        counters["errors"] = counters["errors"] + 1
-        return
-
-    if not AddMissingActions(args, root_key, missing_actions):
-        counters["errors"] = counters["errors"] + 1
-        return
-
-    if len(missing_actions) > 0:
+    severity_actions_added = severity_actions_result[1]
+    if severity_actions_added > 0:
         counters["actions_added"] = counters["actions_added"] + 1
 
     if not CheckDeleteConditions(alert_data):
