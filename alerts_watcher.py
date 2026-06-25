@@ -13,7 +13,7 @@ import sys
 
 CLI_PATH_DEFAULT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    "alerts_cli.py"
+    "alios.py"
 )
 STATE_FILE_DEFAULT = "/tmp/alerts.json"
 LOG_FILE = "/tmp/alerts_watcher.log"
