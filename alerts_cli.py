@@ -16,6 +16,43 @@ STATE_FILE_DEFAULT = "/tmp/alerts.json"
 LOG_FILE = "/tmp/alerts.log"
 VERBOSE = False
 GROUP_PATTERN = r"SG/([^,/]+)"
+
+SEVERITY_ACTION = {
+    "0": [
+        "ktalkUserMessage"
+    ],
+    "1": [
+        "ktalkUserMessage",
+        "InsightActiv"
+    ],
+    "2": [
+        "ktalkUserMessage",
+        "InsightActiv",
+        "ktalkBot",
+        "InsightID"
+    ],
+    "3": [
+        "ktalkUserMessage",
+        "InsightActiv",
+        "ktalkBot",
+        "InsightID"
+    ],
+    "4": [
+        "ktalkUserMessage",
+        "InsightActiv",
+        "ktalkBot",
+        "InsightID",
+        "InsightRecepients"
+    ],
+    "5": [
+        "ktalkUserMessage",
+        "InsightActiv",
+        "ktalkBot",
+        "InsightID",
+        "InsightRecepients",
+        "jiraINC"
+    ]
+}
 ACTION_TEMPLATE_INC = {
     "ktalkUserMessage": {
         "ktalkUsersList": [],
@@ -69,6 +106,7 @@ def GetArgs():
     parser.add_argument("--key")
     parser.add_argument("--data")
     parser.add_argument("-a", dest="action_keys")
+    parser.add_argument("--severity-actions", dest="severity_actions", action="store_true")
     parser.add_argument("-l", dest="list_key")
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser
@@ -234,8 +272,8 @@ def CheckDeleteArgs(args):
 
 def CheckUpdateArgs(args):
     CheckRequiredValue(args.path, "--path")
-    if args.data is None and args.action_keys is None:
-        raise ValueError("Required argument is missing: --data or -a")
+    if args.data is None and args.action_keys is None and not args.severity_actions:
+        raise ValueError("Required argument is missing: --data, -a or --severity-actions")
 
 
 def CreateEventOneAlertData(args):
@@ -636,6 +674,52 @@ def AddActionTemplateKeysByJsonPath(alert_dictionary_list, json_path, action_key
         WriteLog("Action key {} added to root key {}".format(action_key, root_key), "INFO")
 
 
+def GetSeverityActionKeys(root_value):
+    severity_value = root_value.get("severity")
+    if severity_value is None:
+        raise ValueError("Severity is missing")
+
+    severity_key = str(severity_value)
+    if severity_key not in SEVERITY_ACTION:
+        raise ValueError("Unknown severity: {}".format(severity_key))
+
+    WriteLog("Package severity: {}".format(severity_key), "INFO")
+    return SEVERITY_ACTION[severity_key]
+
+
+def AddSeverityActionTemplateKeysByJsonPath(alert_dictionary_list, json_path):
+    root_key, nested_path = GetRootKeyAndNestedPath(alert_dictionary_list, json_path)
+
+    if len(nested_path) != 0:
+        raise ValueError("Severity action keys can be added only to a first-level dictionary")
+
+    root_value = GetTopLevelValueByKey(alert_dictionary_list, root_key)
+    if not isinstance(root_value, dict):
+        raise ValueError("Selected root value is not a dictionary: {}".format(root_key))
+
+    if "action" not in root_value or root_value["action"] is None:
+        root_value["action"] = {}
+
+    if not isinstance(root_value["action"], dict):
+        raise ValueError("Action value is not a dictionary for root key {}".format(root_key))
+
+    required_action_keys = GetSeverityActionKeys(root_value)
+    added_action_keys = []
+
+    for action_key in required_action_keys:
+        if action_key not in ACTION_TEMPLATE_INC:
+            raise ValueError("Action template key was not found: {}".format(action_key))
+        if action_key in root_value["action"]:
+            WriteLog("Severity action key {} already exists for root key {}, nothing changed".format(action_key, root_key), "INFO")
+            continue
+        root_value["action"][action_key] = CopyDictionary(ACTION_TEMPLATE_INC[action_key])
+        added_action_keys.append(action_key)
+        WriteLog("Severity action key {} added to root key {}".format(action_key, root_key), "INFO")
+
+    WriteLog("Added severity action keys for root key {}: {}".format(root_key, ", ".join(added_action_keys)), "INFO")
+    return added_action_keys
+
+
 def UpdateAlertDictionaryValue(args):
     CheckUpdateArgs(args)
     alert_dictionary_list = LoadAlertDictionaryList(args.state_file)
@@ -646,7 +730,14 @@ def UpdateAlertDictionaryValue(args):
     if args.action_keys is not None:
         AddActionTemplateKeysByJsonPath(alert_dictionary_list, args.path, args.action_keys)
 
+    added_severity_action_keys = []
+    if args.severity_actions:
+        added_severity_action_keys = AddSeverityActionTemplateKeysByJsonPath(alert_dictionary_list, args.path)
+
     SaveAlertDictionaryList(args.state_file, alert_dictionary_list)
+
+    if args.severity_actions:
+        print(json.dumps({"added": added_severity_action_keys}, ensure_ascii=False))
 
 
 ############################### BODY ###############################
