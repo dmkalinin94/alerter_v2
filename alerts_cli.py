@@ -23,7 +23,27 @@ ACTION_TEMPLATE_INC = {
         "errorMessage": "",
         "retryNumber": ""
     },
+    "InsightActiv": {
+        "stepSate": "",
+        "errorMessage": "",
+        "retryNumber": ""
+    },
     "ktalkBot": {
+        "stepSate": "",
+        "errorMessage": "",
+        "retryNumber": ""
+    },
+    "InsightID": {
+        "stepSate": "",
+        "errorMessage": "",
+        "retryNumber": ""
+    },
+    "InsightRecepients": {
+        "stepSate": "",
+        "errorMessage": "",
+        "retryNumber": ""
+    },
+    "jiraINC": {
         "stepSate": "",
         "errorMessage": "",
         "retryNumber": ""
