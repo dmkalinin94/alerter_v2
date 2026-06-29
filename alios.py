@@ -19,73 +19,33 @@ GROUP_PATTERN = r"SG/([^,/]+)"
 
 SEVERITY_ACTION = {
     "0": [
-        "ktalkUserMessage"
+        "InsightID"
     ],
     "1": [
-        "ktalkUserMessage",
-        "InsightActiv"
+        "InsightID"
     ],
     "2": [
-        "ktalkUserMessage",
-        "InsightActiv",
-        "ktalkBot",
         "InsightID"
     ],
     "3": [
-        "ktalkUserMessage",
-        "InsightActiv",
-        "ktalkBot",
         "InsightID"
     ],
     "4": [
-        "ktalkUserMessage",
-        "InsightActiv",
-        "ktalkBot",
-        "InsightID",
-        "InsightRecepients"
+        "InsightID"
     ],
     "5": [
-        "ktalkUserMessage",
-        "InsightActiv",
-        "ktalkBot",
-        "InsightID",
-        "InsightRecepients",
-        "jiraINC"
+        "InsightID"
     ]
 }
 ACTION_TEMPLATE_INC = {
-    "ktalkUserMessage": {
-        "ktalkUsersList": [],
-        "stepSate": "",
-        "errorMessage": "",
-        "retryNumber": ""
-    },
-    "InsightActiv": {
-        "stepSate": "",
-        "errorMessage": "",
-        "retryNumber": ""
-    },
-    "ktalkBot": {
-        "stepSate": "",
-        "errorMessage": "",
-        "retryNumber": ""
-    },
     "InsightID": {
-        "stepSate": "",
+        "stepSate": 0,
         "errorMessage": "",
-        "retryNumber": ""
-    },
-    "InsightRecepients": {
-        "stepSate": "",
-        "errorMessage": "",
-        "retryNumber": ""
-    },
-    "jiraINC": {
-        "stepSate": "",
-        "errorMessage": "",
-        "retryNumber": ""
+        "retryNumber": 0,
+        "insightId": ""
     }
 }
+
 
 
 ############################### ARGS ###############################
@@ -105,6 +65,7 @@ def GetArgs():
     parser.add_argument("--path", default="$")
     parser.add_argument("--key")
     parser.add_argument("--data")
+    parser.add_argument("--json-data", dest="json_data")
     parser.add_argument("-a", dest="action_keys")
     parser.add_argument("--severity-actions", dest="severity_actions", action="store_true")
     parser.add_argument("-l", dest="list_key")
@@ -272,8 +233,8 @@ def CheckDeleteArgs(args):
 
 def CheckUpdateArgs(args):
     CheckRequiredValue(args.path, "--path")
-    if args.data is None and args.action_keys is None and not args.severity_actions:
-        raise ValueError("Required argument is missing: --data, -a or --severity-actions")
+    if args.data is None and args.json_data is None and args.action_keys is None and not args.severity_actions:
+        raise ValueError("Required argument is missing: --data, --json-data, -a or --severity-actions")
 
 
 def CreateEventOneAlertData(args):
@@ -554,10 +515,7 @@ def UpdateAlertDictionaryList(args):
         raise ValueError("Unsupported event value: {}".format(args.event))
 
     severity_value = GetIntegerValue(args.severity, "severity")
-    if severity_value == 0:
-        WriteLog("Severity is 0, no action is required", "INFO")
-        return
-    if severity_value < 1 or severity_value > 5:
+    if severity_value < 0 or severity_value > 5:
         raise ValueError("Unsupported severity value: {}".format(args.severity))
 
     alert_dictionary_list = LoadAlertDictionaryList(args.state_file)
@@ -727,6 +685,15 @@ def UpdateAlertDictionaryValue(args):
     if args.data is not None:
         UpdateValueByJsonPath(alert_dictionary_list, args.path, args.data)
 
+    if args.json_data is not None:
+        try:
+            json_data = json.loads(args.json_data)
+        except ValueError as error:
+            raise ValueError("Invalid JSON in --json-data: {}".format(error))
+        if not isinstance(json_data, dict):
+            raise ValueError("--json-data must be a JSON dictionary")
+        UpdateValueByJsonPath(alert_dictionary_list, args.path, json_data)
+
     if args.action_keys is not None:
         AddActionTemplateKeysByJsonPath(alert_dictionary_list, args.path, args.action_keys)
 
@@ -743,38 +710,45 @@ def UpdateAlertDictionaryValue(args):
 ############################### BODY ###############################
 
 
-parser = GetArgs()
-args = parser.parse_args()
-VERBOSE = args.verbose
+def Main():
+    global VERBOSE
 
-lock_file = None
+    parser = GetArgs()
+    args = parser.parse_args()
+    VERBOSE = args.verbose
 
-try:
-    WriteLog("Script started in mode {}".format(args.mode), "INFO")
-    WriteLog("Selected mode: {}".format(args.mode), "INFO")
-
-    lock_file = OpenStateFileLock(args.state_file)
-
-    if args.mode == "add":
-        UpdateAlertDictionaryList(args)
-    elif args.mode == "select":
-        SelectAlertDictionaryList(args)
-    elif args.mode == "del":
-        DeleteAlertDictionaryByRootKey(args)
-    elif args.mode == "update":
-        UpdateAlertDictionaryValue(args)
-    else:
-        raise ValueError("Unsupported mode: {}".format(args.mode))
-
-    CloseStateFileLock(lock_file, args.state_file)
     lock_file = None
 
-    WriteLog("Script finished successfully", "INFO")
-    sys.exit(0)
-except Exception as error:
     try:
+        WriteLog("Script started in mode {}".format(args.mode), "INFO")
+        WriteLog("Selected mode: {}".format(args.mode), "INFO")
+
+        lock_file = OpenStateFileLock(args.state_file)
+
+        if args.mode == "add":
+            UpdateAlertDictionaryList(args)
+        elif args.mode == "select":
+            SelectAlertDictionaryList(args)
+        elif args.mode == "del":
+            DeleteAlertDictionaryByRootKey(args)
+        elif args.mode == "update":
+            UpdateAlertDictionaryValue(args)
+        else:
+            raise ValueError("Unsupported mode: {}".format(args.mode))
+
         CloseStateFileLock(lock_file, args.state_file)
-    except Exception as unlock_error:
-        WriteLog("Execution failed while unlocking: {}".format(unlock_error), "ERROR")
-    WriteLog("Execution failed: {}".format(error), "ERROR")
-    sys.exit(1)
+        lock_file = None
+
+        WriteLog("Script finished successfully", "INFO")
+        sys.exit(0)
+    except Exception as error:
+        try:
+            CloseStateFileLock(lock_file, args.state_file)
+        except Exception as unlock_error:
+            WriteLog("Execution failed while unlocking: {}".format(unlock_error), "ERROR")
+        WriteLog("Execution failed: {}".format(error), "ERROR")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    Main()
