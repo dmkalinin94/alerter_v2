@@ -174,6 +174,30 @@ def AddSeverityActions(args, root_key):
     return True, len(added_actions)
 
 
+
+
+def CheckActionsCompleted(root_key, alert_data):
+    action_dictionary = alert_data.get("action")
+    if not isinstance(action_dictionary, dict):
+        WriteLog("Root key {} cannot be deleted because action dictionary is missing or invalid".format(root_key), "INFO")
+        return False
+
+    for action_name in action_dictionary:
+        action_data = action_dictionary[action_name]
+        if not isinstance(action_data, dict):
+            WriteLog("Root key {} cannot be deleted because action {} has invalid structure".format(root_key, action_name), "INFO")
+            return False
+        if action_data.get("stepSate") != 1:
+            WriteLog("Root key {} cannot be deleted because action {} is not completed: {}".format(
+                root_key,
+                action_name,
+                action_data.get("stepSate")
+            ), "INFO")
+            return False
+
+    WriteLog("All actions are completed for root key {}".format(root_key), "INFO")
+    return True
+
 def CheckDeleteCondition(alert_data, condition):
     field_name = condition.get("field")
     operator = condition.get("operator")
@@ -358,6 +382,11 @@ def ProcessPackage(args, root_key, alert_data, counters):
     severity_actions_added = severity_actions_result[1]
     if severity_actions_added > 0:
         counters["actions_added"] = counters["actions_added"] + 1
+
+    if not CheckActionsCompleted(root_key, alert_data):
+        counters["skipped"] = counters["skipped"] + 1
+        WriteLog("Root key {} was not deleted because actions are not completed".format(root_key), "INFO")
+        return
 
     if not CheckDeleteConditions(alert_data):
         counters["skipped"] = counters["skipped"] + 1
