@@ -42,7 +42,7 @@ def GetInsightIdByShortName(short_name):
         )
         cursor = connection.cursor()
         cursor.execute(
-            "SELECT insight_id\nFROM availconf.insight_id\nWHERE short_name = %s;",
+            "SELECT insight_id FROM availconf.insight_id WHERE short_name = %s;",
             (short_name,)
         )
         rows = cursor.fetchall()
