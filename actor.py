@@ -19,6 +19,9 @@ LOG_FILE = "/tmp/actor.log"
 VERBOSE = False
 
 
+############################### ARGS ###############################
+
+
 def GetArgs():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cli-path", dest="cli_path", default=CLI_PATH_DEFAULT)
@@ -26,6 +29,9 @@ def GetArgs():
     parser.add_argument("--state-file", dest="state_file", default=STATE_FILE_DEFAULT)
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser.parse_args()
+
+
+############################### LOGS ###############################
 
 
 def WriteLog(message, level):
@@ -36,6 +42,9 @@ def WriteLog(message, level):
     file.close()
     if VERBOSE:
         print(log_message)
+
+
+############################### FUNCTIONS ###############################
 
 
 def RunCommand(command):
@@ -280,6 +289,9 @@ def Main():
     WriteLog("Packages with structure errors: {}".format(counters["structure_errors"]), "INFO")
     WriteLog("CLI write errors: {}".format(counters["cli_write_errors"]), "INFO")
     sys.exit(0)
+
+
+############################### BODY ###############################
 
 
 if __name__ == "__main__":

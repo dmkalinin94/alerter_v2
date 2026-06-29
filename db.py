@@ -3,7 +3,26 @@
 
 import psycopg2
 
-from env import DB_HOST, DB_NAME, DB_PASSWORD, DB_PORT, DB_USER
+from config.settings import DB_HOST, DB_NAME, DB_PASSWORD, DB_PORT, DB_USER
+
+
+############################### FUNCTIONS ###############################
+
+
+def MakeSuccessResult(insight_id):
+    return {
+        "success": True,
+        "insightId": insight_id,
+        "errorMessage": ""
+    }
+
+
+def MakeErrorResult(error_message):
+    return {
+        "success": False,
+        "insightId": "",
+        "errorMessage": error_message
+    }
 
 
 def GetInsightIdByShortName(short_name):
@@ -11,11 +30,7 @@ def GetInsightIdByShortName(short_name):
     cursor = None
 
     if short_name is None or str(short_name).strip() == "":
-        return {
-            "success": False,
-            "insightId": "",
-            "errorMessage": "short_name is empty"
-        }
+        return MakeErrorResult("short_name is empty")
 
     try:
         connection = psycopg2.connect(
@@ -33,46 +48,22 @@ def GetInsightIdByShortName(short_name):
         rows = cursor.fetchall()
 
         if len(rows) == 0:
-            return {
-                "success": False,
-                "insightId": "",
-                "errorMessage": "Insight ID was not found for short_name {}".format(short_name)
-            }
+            return MakeErrorResult("Insight ID was not found for short_name {}".format(short_name))
 
         if len(rows) > 1:
-            return {
-                "success": False,
-                "insightId": "",
-                "errorMessage": "More than one Insight ID was found for short_name {}".format(short_name)
-            }
+            return MakeErrorResult("More than one Insight ID was found for short_name {}".format(short_name))
 
         insight_id = rows[0][0]
         if insight_id is None:
-            return {
-                "success": False,
-                "insightId": "",
-                "errorMessage": "Insight ID is NULL for short_name {}".format(short_name)
-            }
+            return MakeErrorResult("Insight ID is NULL for short_name {}".format(short_name))
 
         insight_id = str(insight_id)
         if insight_id == "":
-            return {
-                "success": False,
-                "insightId": "",
-                "errorMessage": "Insight ID is empty for short_name {}".format(short_name)
-            }
+            return MakeErrorResult("Insight ID is empty for short_name {}".format(short_name))
 
-        return {
-            "success": True,
-            "insightId": insight_id,
-            "errorMessage": ""
-        }
+        return MakeSuccessResult(insight_id)
     except Exception as error:
-        return {
-            "success": False,
-            "insightId": "",
-            "errorMessage": "PostgreSQL error for short_name {}: {}".format(short_name, error)
-        }
+        return MakeErrorResult("PostgreSQL error for short_name {}: {}".format(short_name, error))
     finally:
         if cursor is not None:
             try:
