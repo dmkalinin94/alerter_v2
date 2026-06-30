@@ -3,7 +3,7 @@
 
 import psycopg2
 
-from config.local_settings_and_secrets import DB_HOST, DB_NAME, DB_PASSWORD, DB_PORT, DB_USER
+from config.local_settings_and_secrets import DB_HOST, DB_NAME, DB_PASSWORD, DB_PORT, DB_USER, DB_CONNECT_TIMEOUT_SECONDS, DB_STATEMENT_TIMEOUT_MS
 
 
 ############################### FUNCTIONS ###############################
@@ -38,7 +38,9 @@ def GetInsightIdByShortName(short_name):
             port=DB_PORT,
             dbname=DB_NAME,
             user=DB_USER,
-            password=DB_PASSWORD
+            password=DB_PASSWORD,
+            connect_timeout=DB_CONNECT_TIMEOUT_SECONDS,
+            options="-c statement_timeout={}".format(DB_STATEMENT_TIMEOUT_MS)
         )
         cursor = connection.cursor()
         cursor.execute(

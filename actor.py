@@ -2,14 +2,34 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import fcntl
 import datetime
 import json
 import os
+import signal
+import time
+import traceback
 import subprocess
 import sys
 
 import alios
 import db
+
+try:
+    from config.local_settings_and_secrets import (
+        ACTOR_LOCK_FILE, ACTOR_LOCK_RETRY_INTERVAL_SECONDS, ACTOR_LOCK_TIMEOUT_SECONDS,
+        ACTOR_MAX_RUNTIME_SECONDS, CLI_COMMAND_TIMEOUT_SECONDS, LOG_KEEP_SIZE_BYTES,
+        LOG_MAX_SIZE_BYTES, WATCHER_COMMAND_TIMEOUT_SECONDS
+    )
+except ImportError:
+    ACTOR_LOCK_FILE = "/tmp/alerter_actor.lock"
+    ACTOR_LOCK_TIMEOUT_SECONDS = 10
+    ACTOR_LOCK_RETRY_INTERVAL_SECONDS = 0.2
+    ACTOR_MAX_RUNTIME_SECONDS = 30
+    CLI_COMMAND_TIMEOUT_SECONDS = 10
+    WATCHER_COMMAND_TIMEOUT_SECONDS = 20
+    LOG_MAX_SIZE_BYTES = 104857600
+    LOG_KEEP_SIZE_BYTES = 83886080
 
 
 CLI_PATH_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alios.py")
@@ -34,12 +54,33 @@ def GetArgs():
 ############################### LOGS ###############################
 
 
+def TrimLogFileIfNeeded(log_file):
+    try:
+        if not os.path.exists(log_file) or os.path.getsize(log_file) < LOG_MAX_SIZE_BYTES:
+            return
+        with open(log_file, "rb") as file:
+            if os.path.getsize(log_file) > LOG_KEEP_SIZE_BYTES:
+                file.seek(-LOG_KEEP_SIZE_BYTES, os.SEEK_END)
+            data = file.read()
+        newline_index = data.find(b"\n")
+        if newline_index >= 0:
+            data = data[newline_index + 1:]
+        with open(log_file, "wb") as file:
+            file.write(data)
+    except Exception as error:
+        print("Failed to trim log file {}: {}".format(log_file, error), file=sys.stderr)
+
+
 def WriteLog(message, level, component="actor"):
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     log_message = "{} [{}] {}: {}".format(now, level, component, message)
-    file = open(LOG_FILE, "a", encoding="utf-8")
-    file.write(log_message + "\n")
-    file.close()
+    try:
+        TrimLogFileIfNeeded(LOG_FILE)
+        file = open(LOG_FILE, "a", encoding="utf-8")
+        file.write(log_message + "\n")
+        file.close()
+    except Exception as error:
+        print("Failed to write log file {}: {}".format(LOG_FILE, error), file=sys.stderr)
     if VERBOSE:
         print(log_message)
 
@@ -64,8 +105,8 @@ def WriteComponentOutput(component, output, default_level):
 ############################### FUNCTIONS ###############################
 
 
-def RunCommand(command):
-    return subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+def RunCommand(command, timeout_seconds):
+    return subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout_seconds)
 
 
 def RunWatcher(args):
@@ -84,7 +125,7 @@ def RunWatcher(args):
     command.append("-v")
 
     WriteLog("Starting watcher: {}".format(" ".join(command)), "INFO")
-    result = RunCommand(command)
+    result = RunCommand(command, WATCHER_COMMAND_TIMEOUT_SECONDS)
     WriteComponentOutput("watcher", result.stdout, "INFO")
     WriteComponentOutput("watcher", result.stderr, "ERROR")
     WriteLog("Watcher finished with code {}".format(result.returncode), "INFO")
@@ -100,7 +141,11 @@ def LoadAlertPackages(args):
 
     command = [sys.executable, args.cli_path, "select", "--state-file", args.state_file, "--path", "$"]
     WriteLog("Loading alert packages with CLI select", "INFO")
-    result = RunCommand(command)
+    try:
+        result = RunCommand(command, CLI_COMMAND_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as error:
+        WriteLog("CLI select timed out after {} seconds: {}".format(CLI_COMMAND_TIMEOUT_SECONDS, error), "ERROR")
+        return None
     if result.returncode != 0:
         WriteLog("CLI select failed with code {}".format(result.returncode), "ERROR")
         WriteLog("CLI select stderr: {}".format(result.stderr.strip()), "ERROR")
@@ -138,7 +183,11 @@ def UpdateAction(args, root_key, action_name, action_data):
         "--json-data",
         json.dumps(action_data, ensure_ascii=False)
     ]
-    result = RunCommand(command)
+    try:
+        result = RunCommand(command, CLI_COMMAND_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as error:
+        WriteLog("CLI update timed out after {} seconds for root key {} action {}: {}".format(CLI_COMMAND_TIMEOUT_SECONDS, root_key, action_name, error), "ERROR")
+        return False
     if result.returncode != 0:
         WriteLog("CLI update failed for root key {} action {} with code {}".format(root_key, action_name, result.returncode), "ERROR")
         WriteLog("CLI update stderr: {}".format(result.stderr.strip()), "ERROR")
@@ -147,6 +196,12 @@ def UpdateAction(args, root_key, action_name, action_data):
     WriteLog("Action {} updated through CLI for root key {}".format(action_name, root_key), "INFO")
     return True
 
+
+def GetRetryNumber(action_data):
+    try:
+        return int(action_data.get("retryNumber", 0))
+    except (TypeError, ValueError):
+        return 0
 
 def HandleInsightID(root_key, action_data):
     retry_number = action_data.get("retryNumber", 0)
@@ -238,7 +293,17 @@ def ProcessPackage(args, root_key, alert_data, counters, handlers):
             counters["structure_errors"] = counters["structure_errors"] + 1
             return
 
-        success, new_action_data = handlers[action_name](root_key, action_data)
+        try:
+            success, new_action_data = handlers[action_name](root_key, action_data)
+        except Exception as error:
+            WriteLog("Action {} raised exception for root key {}: {}".format(action_name, root_key, error), "ERROR")
+            WriteLog(traceback.format_exc(), "ERROR")
+            retry_number = GetRetryNumber(action_data)
+            new_action_data = action_data.copy()
+            new_action_data["stepSate"] = 2
+            new_action_data["retryNumber"] = retry_number + 1
+            new_action_data["errorMessage"] = ("{}: {}".format(type(error).__name__, str(error)))[:2000]
+            success = False
         if not UpdateAction(args, root_key, action_name, new_action_data):
             counters["cli_write_errors"] = counters["cli_write_errors"] + 1
             return
@@ -265,46 +330,101 @@ def ProcessAlertPackages(args, alert_dictionary_list):
         "cli_write_errors": 0
     }
 
+    counters["package_errors"] = 0
     for alert_dictionary in alert_dictionary_list:
+        if not isinstance(alert_dictionary, dict):
+            counters["package_errors"] = counters["package_errors"] + 1
+            WriteLog("Alert package list item is not a dictionary", "ERROR")
+            continue
         for root_key in alert_dictionary:
-            ProcessPackage(args, root_key, alert_dictionary[root_key], counters, handlers)
+            try:
+                ProcessPackage(args, root_key, alert_dictionary[root_key], counters, handlers)
+            except Exception as error:
+                counters["package_errors"] = counters["package_errors"] + 1
+                WriteLog("Package processing error for root key {}: {}: {}".format(root_key, type(error).__name__, error), "ERROR")
+                WriteLog(traceback.format_exc(), "ERROR")
 
     return counters
 
+
+def AcquireActorLock():
+    deadline = time.time() + ACTOR_LOCK_TIMEOUT_SECONDS
+    lock_file = open(ACTOR_LOCK_FILE, "a+", encoding="utf-8")
+    while True:
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            WriteLog("Actor lock acquired: {}".format(ACTOR_LOCK_FILE), "INFO")
+            return lock_file
+        except BlockingIOError:
+            if time.time() >= deadline:
+                WriteLog("Actor lock timeout. Another actor process is still running.", "WARNING")
+                lock_file.close()
+                return None
+            time.sleep(ACTOR_LOCK_RETRY_INTERVAL_SECONDS)
+
+def ReleaseActorLock(lock_file):
+    if lock_file is None:
+        return
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
+        lock_file.close()
+        WriteLog("Actor lock released: {}".format(ACTOR_LOCK_FILE), "INFO")
+    except Exception as error:
+        WriteLog("Failed to release actor lock: {}".format(error), "ERROR")
+
+def ActorTimeoutHandler(signum, frame):
+    WriteLog("Actor maximum runtime exceeded: {} seconds".format(ACTOR_MAX_RUNTIME_SECONDS), "ERROR")
+    os._exit(124)
 
 def Main():
     global VERBOSE
     args = GetArgs()
     VERBOSE = args.verbose
 
-    WriteLog("Actor started", "INFO")
-    WriteLog("CLI path: {}".format(args.cli_path), "INFO")
-    WriteLog("Watcher path: {}".format(args.watcher_path), "INFO")
-    WriteLog("State file path: {}".format(args.state_file), "INFO")
+    lock_file = AcquireActorLock()
+    if lock_file is None:
+        sys.exit(0)
 
-    if not os.path.exists(args.cli_path):
-        WriteLog("CLI file was not found: {}".format(args.cli_path), "ERROR")
-        sys.exit(1)
+    signal.signal(signal.SIGALRM, ActorTimeoutHandler)
+    signal.alarm(ACTOR_MAX_RUNTIME_SECONDS)
+    try:
+        WriteLog("Actor started", "INFO")
+        WriteLog("CLI path: {}".format(args.cli_path), "INFO")
+        WriteLog("Watcher path: {}".format(args.watcher_path), "INFO")
+        WriteLog("State file path: {}".format(args.state_file), "INFO")
 
-    if not RunWatcher(args):
-        WriteLog("Actor finished with watcher error", "ERROR")
-        sys.exit(1)
+        if not os.path.exists(args.cli_path):
+            WriteLog("CLI file was not found: {}".format(args.cli_path), "ERROR")
+            sys.exit(1)
 
-    alert_dictionary_list = LoadAlertPackages(args)
-    if alert_dictionary_list is None:
-        WriteLog("Actor finished with package loading error", "ERROR")
-        sys.exit(1)
+        try:
+            watcher_ok = RunWatcher(args)
+        except subprocess.TimeoutExpired as error:
+            WriteLog("Watcher timed out after {} seconds: {}".format(WATCHER_COMMAND_TIMEOUT_SECONDS, error), "ERROR")
+            sys.exit(1)
+        if not watcher_ok:
+            WriteLog("Actor finished with watcher error", "ERROR")
+            sys.exit(1)
 
-    counters = ProcessAlertPackages(args, alert_dictionary_list)
+        alert_dictionary_list = LoadAlertPackages(args)
+        if alert_dictionary_list is None:
+            WriteLog("Actor finished with package loading error", "ERROR")
+            sys.exit(1)
 
-    WriteLog("Actor finished", "INFO")
-    WriteLog("Processed packages: {}".format(counters["processed"]), "INFO")
-    WriteLog("Successful actions: {}".format(counters["actions_success"]), "INFO")
-    WriteLog("Skipped completed actions: {}".format(counters["skipped_done"]), "INFO")
-    WriteLog("Actions with errors: {}".format(counters["actions_error"]), "INFO")
-    WriteLog("Packages with structure errors: {}".format(counters["structure_errors"]), "INFO")
-    WriteLog("CLI write errors: {}".format(counters["cli_write_errors"]), "INFO")
-    sys.exit(0)
+        counters = ProcessAlertPackages(args, alert_dictionary_list)
+
+        WriteLog("Actor finished", "INFO")
+        WriteLog("Processed packages: {}".format(counters["processed"]), "INFO")
+        WriteLog("Successful actions: {}".format(counters["actions_success"]), "INFO")
+        WriteLog("Skipped completed actions: {}".format(counters["skipped_done"]), "INFO")
+        WriteLog("Actions with errors: {}".format(counters["actions_error"]), "INFO")
+        WriteLog("Packages with structure errors: {}".format(counters["structure_errors"]), "INFO")
+        WriteLog("Package processing errors: {}".format(counters.get("package_errors", 0)), "INFO")
+        WriteLog("CLI write errors: {}".format(counters["cli_write_errors"]), "INFO")
+        sys.exit(0)
+    finally:
+        signal.alarm(0)
+        ReleaseActorLock(lock_file)
 
 
 ############################### BODY ###############################
