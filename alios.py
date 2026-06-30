@@ -592,7 +592,14 @@ def DeleteAlertDictionaryByRootKey(args):
     SaveAlertDictionaryList(args.state_file, new_alert_dictionary_list)
 
 
+def LogAddArguments(args):
+    argument_dictionary = vars(args)
+    for argument_name in sorted(argument_dictionary):
+        WriteLog("add argument {}: {}".format(argument_name, argument_dictionary[argument_name]), "INFO")
+
+
 def UpdateAlertDictionaryList(args):
+    LogAddArguments(args)
     CheckAddArgs(args)
     root_keys = ExtractRootKeysFromGroups(args.groups)
 
