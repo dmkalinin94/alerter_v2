@@ -40,7 +40,7 @@ DELETE_CONDITIONS = [
         "value": 0
     },
     {
-        "field": "zeroBalanceTime",
+        "field": "zeroRecaveryBalance",
         "operator": "not_empty"
     }
 ]
@@ -280,17 +280,17 @@ def CheckTimeRange(check_time, start_time_value, end_time_value, rule_name):
     return check_time >= start_time or check_time < end_time
 
 
-def CheckDelayRule(zero_balance_datetime, rule):
+def CheckDelayRule(zero_recavery_balance_datetime, rule):
     rule_name = rule.get("name", "unknown")
     weekdays = rule.get("weekdays")
 
     if weekdays is not None:
-        if zero_balance_datetime.weekday() not in weekdays:
+        if zero_recavery_balance_datetime.weekday() not in weekdays:
             WriteLog("Delay rule {} does not match weekday".format(rule_name), "INFO")
             return False
 
     if not CheckTimeRange(
-        zero_balance_datetime.time(),
+        zero_recavery_balance_datetime.time(),
         rule.get("start_time"),
         rule.get("end_time"),
         rule_name
@@ -302,12 +302,12 @@ def CheckDelayRule(zero_balance_datetime, rule):
     return True
 
 
-def GetDeleteDelay(zero_balance_datetime):
+def GetDeleteDelay(zero_recavery_balance_datetime):
     matched_rule_names = []
     matched_delay_minutes = []
 
     for rule in DELETE_DELAY_RULES:
-        if CheckDelayRule(zero_balance_datetime, rule):
+        if CheckDelayRule(zero_recavery_balance_datetime, rule):
             matched_rule_names.append(rule.get("name", "unknown"))
             matched_delay_minutes.append(rule.get("delay_minutes", DEFAULT_DELETE_DELAY_MINUTES))
 
@@ -323,21 +323,21 @@ def GetDeleteDelay(zero_balance_datetime):
 
 
 def CheckPackageAge(alert_data):
-    zero_balance_time = alert_data.get("zeroBalanceTime")
+    zero_recavery_balance = alert_data.get("zeroRecaveryBalance")
 
     try:
-        zero_balance_datetime = ParseTimeValue(zero_balance_time)
+        zero_recavery_balance_datetime = ParseTimeValue(zero_recavery_balance)
     except (TypeError, ValueError) as error:
-        WriteLog("Invalid zeroBalanceTime value {}: {}".format(zero_balance_time, error), "ERROR")
+        WriteLog("Invalid zeroRecaveryBalance value {}: {}".format(zero_recavery_balance, error), "ERROR")
         return False, 0, 0, []
 
     now = datetime.datetime.now()
-    if zero_balance_datetime > now:
-        WriteLog("zeroBalanceTime is in the future: {}".format(zero_balance_time), "WARNING")
+    if zero_recavery_balance_datetime > now:
+        WriteLog("zeroRecaveryBalance is in the future: {}".format(zero_recavery_balance), "WARNING")
         return False, 0, 0, []
 
-    delete_delay_minutes, matched_rule_names = GetDeleteDelay(zero_balance_datetime)
-    age = now - zero_balance_datetime
+    delete_delay_minutes, matched_rule_names = GetDeleteDelay(zero_recavery_balance_datetime)
+    age = now - zero_recavery_balance_datetime
     age_minutes = int(age.total_seconds() / 60)
     WriteLog("Package age minutes: {}".format(age_minutes), "INFO")
 

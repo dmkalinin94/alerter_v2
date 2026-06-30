@@ -333,7 +333,7 @@ def CreateEventOneAlertData(args):
         "action": CopyDictionary(action_template),
         "eventBalance": 1,
         "criticalEventBalance": 0,
-        "zeroBalanceTime": ""
+        "zeroRecaveryBalance": ""
     }
     return alert_data
 
@@ -386,11 +386,11 @@ def ApplyEventOneToAlertList(alert_dictionary_list, root_key, args):
             critical_event_ids.append(str(args.eventid))
             alert_data["eventBalance"] = old_event_balance + 1
             alert_data["criticalEventBalance"] = old_critical_event_balance + 1
-            alert_data["zeroBalanceTime"] = ""
+            alert_data["zeroRecaveryBalance"] = ""
     else:
         alert_data["eventBalance"] = old_event_balance + 1
         alert_data["criticalEventBalance"] = old_critical_event_balance
-        alert_data["zeroBalanceTime"] = ""
+        alert_data["zeroRecaveryBalance"] = ""
 
     if "action" not in alert_data:
         alert_data["action"] = GetActionTemplate(args.template)
@@ -404,7 +404,7 @@ def ApplyEventOneToAlertList(alert_dictionary_list, root_key, args):
     ), "INFO")
 
 
-def GetZeroBalanceTimeValue(args):
+def GetZeroRecaveryBalanceTimeValue(args):
     if args.event_recovery_time is None or str(args.event_recovery_time).strip() == "":
         return args.trigger_time
     return args.event_recovery_time
@@ -442,7 +442,7 @@ def ApplyEventZeroToAlertList(alert_dictionary_list, root_key, args):
         alert_data["criticalEventBalance"] = old_critical_event_balance
 
     if alert_data["eventBalance"] == 0:
-        alert_data["zeroBalanceTime"] = GetZeroBalanceTimeValue(args)
+        alert_data["zeroRecaveryBalance"] = GetZeroRecaveryBalanceTimeValue(args)
 
     WriteLog("Root key {} decreased, event balance is {}, critical event balance is {}".format(
         root_key,
@@ -835,13 +835,13 @@ def CheckTimeRangeForDelete(check_time, start_value, end_value):
         return start_time <= check_time < end_time
     return check_time >= start_time or check_time < end_time
 
-def GetDeleteDelayMinutes(zero_balance_datetime):
+def GetDeleteDelayMinutes(zero_recavery_balance_datetime):
     delays = []
     for rule in DELETE_DELAY_RULES:
         weekdays = rule.get("weekdays")
-        if weekdays is not None and zero_balance_datetime.weekday() not in weekdays:
+        if weekdays is not None and zero_recavery_balance_datetime.weekday() not in weekdays:
             continue
-        if CheckTimeRangeForDelete(zero_balance_datetime.time(), rule.get("start_time"), rule.get("end_time")):
+        if CheckTimeRangeForDelete(zero_recavery_balance_datetime.time(), rule.get("start_time"), rule.get("end_time")):
             delays.append(rule.get("delay_minutes", DEFAULT_DELETE_DELAY_MINUTES))
     if not delays:
         return DEFAULT_DELETE_DELAY_MINUTES
@@ -879,13 +879,13 @@ def DeleteReadyAlertDictionaryByRootKey(args):
     if int(alert_data.get("criticalEventBalance", 0)) != 0:
         print(json.dumps(MakeDeleteReadyResponse(False, args.key, "criticalEventBalance is not zero"), ensure_ascii=False, indent=4))
         return
-    zero_balance_time = alert_data.get("zeroBalanceTime")
-    if zero_balance_time is None or str(zero_balance_time).strip() == "":
-        print(json.dumps(MakeDeleteReadyResponse(False, args.key, "zeroBalanceTime is empty"), ensure_ascii=False, indent=4))
+    zero_recavery_balance = alert_data.get("zeroRecaveryBalance")
+    if zero_recavery_balance is None or str(zero_recavery_balance).strip() == "":
+        print(json.dumps(MakeDeleteReadyResponse(False, args.key, "zeroRecaveryBalance is empty"), ensure_ascii=False, indent=4))
         return
-    zero_balance_datetime = ParseTimeValue(zero_balance_time)
-    delay_minutes = GetDeleteDelayMinutes(zero_balance_datetime)
-    age_minutes = int((datetime.datetime.now() - zero_balance_datetime).total_seconds() / 60)
+    zero_recavery_balance_datetime = ParseTimeValue(zero_recavery_balance)
+    delay_minutes = GetDeleteDelayMinutes(zero_recavery_balance_datetime)
+    age_minutes = int((datetime.datetime.now() - zero_recavery_balance_datetime).total_seconds() / 60)
     if age_minutes < delay_minutes:
         print(json.dumps(MakeDeleteReadyResponse(False, args.key, "package age is less than delete delay"), ensure_ascii=False, indent=4))
         return
