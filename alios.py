@@ -63,6 +63,7 @@ def GetArgs():
     parser.add_argument("--event")
     parser.add_argument("--groups")
     parser.add_argument("--triggerTime", dest="trigger_time")
+    parser.add_argument("--eventRecoveryTime", dest="event_recovery_time")
     parser.add_argument("--trigName", dest="trig_name")
     parser.add_argument("--message")
     parser.add_argument("--severity")
@@ -403,6 +404,12 @@ def ApplyEventOneToAlertList(alert_dictionary_list, root_key, args):
     ), "INFO")
 
 
+def GetZeroBalanceTimeValue(args):
+    if args.event_recovery_time is None or str(args.event_recovery_time).strip() == "":
+        return args.trigger_time
+    return args.event_recovery_time
+
+
 def ApplyEventZeroToAlertList(alert_dictionary_list, root_key, args):
     alert_dictionary = FindAlertDictionaryByRootKey(alert_dictionary_list, root_key)
     severity_value = GetIntegerValue(args.severity, "severity")
@@ -435,7 +442,7 @@ def ApplyEventZeroToAlertList(alert_dictionary_list, root_key, args):
         alert_data["criticalEventBalance"] = old_critical_event_balance
 
     if alert_data["eventBalance"] == 0:
-        alert_data["zeroBalanceTime"] = args.trigger_time
+        alert_data["zeroBalanceTime"] = GetZeroBalanceTimeValue(args)
 
     WriteLog("Root key {} decreased, event balance is {}, critical event balance is {}".format(
         root_key,

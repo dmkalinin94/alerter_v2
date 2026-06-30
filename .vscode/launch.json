@@ -14,6 +14,7 @@
                 "--eventid", "10001",
                 "--groups", "AVAIL, SG/S.AXR",
                 "--triggerTime", "2026.06.30 12:00:00",
+                "--eventRecoveryTime", "{EVENT.RECOVERY.DATE} {EVENT.RECOVERY.TIME}",
                 "--trigName", "Test alert",
                 "--message", "Test message",
                 "--severity", "5",
@@ -27,7 +28,7 @@
             "program": "${workspaceFolder}/alios.py",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
-            "args": ["add", "--event", "1", "--groups", "AVAIL, SG/S.AXR", "--triggerTime", "2026.06.30 12:00:00", "--trigName", "Test alert", "--message", "Test message", "--severity", "4", "-v"]
+            "args": ["add", "--event", "1", "--groups", "AVAIL, SG/S.AXR", "--triggerTime", "2026.06.30 12:00:00", "--eventRecoveryTime", "{EVENT.RECOVERY.DATE} {EVENT.RECOVERY.TIME}", "--trigName", "Test alert", "--message", "Test message", "--severity", "4", "-v"]
         },
         {
             "name": "alios select",
