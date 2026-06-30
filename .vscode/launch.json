@@ -2,47 +2,60 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "alerts_cli add verbose",
+            "name": "alios add severity 5",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/alerts_cli.py",
+            "program": "${workspaceFolder}/alios.py",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
-            "justMyCode": true,
             "args": [
-                "-v",
                 "add",
-                "--event",
-                "1",
-                "--tags",
-                "linux",
-                "--severity",
-                "High",
-                "--insightId",
-                "12345",
-                "--groups",
-                "Servers",
-                "--triggerTime",
-                "2026.06.19 10:30:00",
-                "--trigName",
-                "High CPU load",
-                "--message",
-                "CPU usage is above 90%",
-                "--timestamp",
-                "1781857800"
+                "--event", "1",
+                "--eventid", "10001",
+                "--groups", "AVAIL, SG/S.AXR",
+                "--triggerTime", "2026.06.30 12:00:00",
+                "--eventRecoveryTime", "{EVENT.RECOVERY.DATE} {EVENT.RECOVERY.TIME}",
+                "--trigName", "Test alert",
+                "--message", "Test message",
+                "--severity", "5",
+                "-v"
             ]
         },
         {
-            "name": "alerts_cli get",
+            "name": "alios add severity 0-4",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/alerts_cli.py",
+            "program": "${workspaceFolder}/alios.py",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
-            "justMyCode": true,
-            "args": [
-                "get"
-            ]
+            "args": ["add", "--event", "1", "--groups", "AVAIL, SG/S.AXR", "--triggerTime", "2026.06.30 12:00:00", "--eventRecoveryTime", "{EVENT.RECOVERY.DATE} {EVENT.RECOVERY.TIME}", "--trigName", "Test alert", "--message", "Test message", "--severity", "4", "-v"]
+        },
+        {
+            "name": "alios select",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/alios.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": ["select", "--path", "$", "-v"]
+        },
+        {
+            "name": "alerts_watcher",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/alerts_watcher.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": ["-v"]
+        },
+        {
+            "name": "actor",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/actor.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": ["-v"]
         }
     ]
 }
