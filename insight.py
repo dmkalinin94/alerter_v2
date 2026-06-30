@@ -43,6 +43,13 @@ def GetAttributeById(attribute_list, attribute_id):
     return None
 
 
+def FormatUrlTemplate(url_template, parameter_name, parameter_value):
+    try:
+        return url_template.format(**{parameter_name: parameter_value})
+    except (KeyError, IndexError):
+        return url_template.format(parameter_value)
+
+
 def GetJsonList(url, headers, verify, timeout):
     import requests
     response = requests.get(url, headers=headers, verify=verify, timeout=timeout)
@@ -123,7 +130,7 @@ def ExtractRecipients(attribute_list):
 def GetInsightData(insight_id):
     try:
         service_headers = {"Content-Type": "application/json;charset=UTF-8", "Authorization": INSIGHT_AUTH_TOKEN}
-        service_url = INSIGHT_SERVICE_URL.format(insight_id=insight_id)
+        service_url = FormatUrlTemplate(INSIGHT_SERVICE_URL, "insight_id", insight_id)
         service_status_code, service_attributes = GetJsonList(
             service_url,
             service_headers,
@@ -146,7 +153,7 @@ def GetInsightData(insight_id):
         print("Insight responsible group id: {}".format(group_id))
 
         group_headers = {"Content-Type": "application/json", "Authorization": INSIGHT_AUTH_TOKEN}
-        group_url = INSIGHT_GROUP_URL.format(group_id=group_id)
+        group_url = FormatUrlTemplate(INSIGHT_GROUP_URL, "group_id", group_id)
         group_status_code, group_attributes = GetJsonList(
             group_url,
             group_headers,
