@@ -9,6 +9,12 @@ import os
 import re
 import sys
 
+try:
+    from config.local_settings_and_secrets import LOG_MAX_SIZE_BYTES, LOG_KEEP_SIZE_BYTES
+except ImportError:
+    LOG_MAX_SIZE_BYTES = 104857600
+    LOG_KEEP_SIZE_BYTES = 83886080
+
 
 ############################### VARS ###############################
 
@@ -57,9 +63,11 @@ def GetArgs():
     parser.add_argument("--event")
     parser.add_argument("--groups")
     parser.add_argument("--triggerTime", dest="trigger_time")
+    parser.add_argument("--eventRecoveryTime", dest="event_recovery_time")
     parser.add_argument("--trigName", dest="trig_name")
     parser.add_argument("--message")
     parser.add_argument("--severity")
+    parser.add_argument("--eventid")
     parser.add_argument("--template", default="inc")
     parser.add_argument("--state-file", dest="state_file", default=STATE_FILE_DEFAULT)
     parser.add_argument("--path", default="$")
@@ -76,13 +84,34 @@ def GetArgs():
 ############################### LOGS ###############################
 
 
+def TrimLogFileIfNeeded(log_file):
+    try:
+        if not os.path.exists(log_file) or os.path.getsize(log_file) < LOG_MAX_SIZE_BYTES:
+            return
+        with open(log_file, "rb") as file:
+            if os.path.getsize(log_file) > LOG_KEEP_SIZE_BYTES:
+                file.seek(-LOG_KEEP_SIZE_BYTES, os.SEEK_END)
+            data = file.read()
+        newline_index = data.find(b"\n")
+        if newline_index >= 0:
+            data = data[newline_index + 1:]
+        with open(log_file, "wb") as file:
+            file.write(data)
+    except Exception as error:
+        print("Failed to trim log file {}: {}".format(log_file, error), file=sys.stderr)
+
+
 def WriteLog(message, level):
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     log_message = "{} [{}] {}".format(now, level, message)
 
-    file = open(LOG_FILE, "a", encoding="utf-8")
-    file.write(log_message + "\n")
-    file.close()
+    try:
+        TrimLogFileIfNeeded(LOG_FILE)
+        file = open(LOG_FILE, "a", encoding="utf-8")
+        file.write(log_message + "\n")
+        file.close()
+    except Exception as error:
+        print("Failed to write log file {}: {}".format(LOG_FILE, error), file=sys.stderr)
 
     if VERBOSE:
         print(log_message)
@@ -132,6 +161,60 @@ def ExtractRootKeysFromGroups(groups):
     return root_keys
 
 
+
+def RecoverInvalidStateFile(state_file, reason):
+    backup_file = state_file + ".back"
+    WriteLog("Invalid state JSON detected in {}: {}".format(state_file, reason), "ERROR")
+    try:
+        if os.path.exists(backup_file):
+            os.remove(backup_file)
+        os.replace(state_file, backup_file)
+        with open(state_file, "w", encoding="utf-8") as file:
+            json.dump([], file, ensure_ascii=False, indent=4)
+            file.write("\n")
+    except OSError as error:
+        WriteLog("Failed to recover invalid state file {}: {}".format(state_file, error), "ERROR")
+        raise
+    WriteLog("Invalid state JSON moved to {}".format(backup_file), "ERROR")
+    WriteLog("New empty state file created", "ERROR")
+    return []
+
+
+def ValidateAlertDictionaryList(alert_dictionary_list, recover_whole_file=False):
+    if not isinstance(alert_dictionary_list, list):
+        raise ValueError("Invalid state structure: root element must be a list")
+    seen_root_keys = set()
+    for alert_dictionary in alert_dictionary_list:
+        if not isinstance(alert_dictionary, dict) or len(alert_dictionary) != 1:
+            raise ValueError("Invalid package structure: each list item must be a one-key dictionary")
+        root_key = next(iter(alert_dictionary))
+        if str(root_key).strip() == "" or root_key in seen_root_keys:
+            raise ValueError("Invalid or duplicate root key: {}".format(root_key))
+        seen_root_keys.add(root_key)
+        alert_data = alert_dictionary[root_key]
+        if not isinstance(alert_data, dict):
+            raise ValueError("Invalid alert data for root key {}".format(root_key))
+        action_dictionary = alert_data.get("action", {})
+        if action_dictionary is not None and not isinstance(action_dictionary, dict):
+            raise ValueError("Invalid action dictionary for root key {}".format(root_key))
+        for field_name in ("eventBalance", "criticalEventBalance"):
+            value = int(alert_data.get(field_name, 0))
+            if value < 0:
+                raise ValueError("{} is negative for root key {}".format(field_name, root_key))
+        severity_value = int(alert_data.get("severity", 0))
+        if severity_value < 0 or severity_value > 5:
+            raise ValueError("Invalid severity for root key {}".format(root_key))
+        for action_name, action_data in action_dictionary.items():
+            if not isinstance(action_data, dict):
+                raise ValueError("Invalid action {} for root key {}".format(action_name, root_key))
+            if int(action_data.get("stepSate", 0)) not in (0, 1, 2):
+                raise ValueError("Invalid stepSate for action {} root key {}".format(action_name, root_key))
+            if int(action_data.get("retryNumber", 0)) < 0:
+                raise ValueError("Invalid retryNumber for action {} root key {}".format(action_name, root_key))
+        if "criticalEventIds" in alert_data and not isinstance(alert_data["criticalEventIds"], list):
+            raise ValueError("criticalEventIds is not a list for root key {}".format(root_key))
+    return True
+
 def LoadAlertDictionaryList(state_file):
     if not os.path.exists(state_file):
         WriteLog("State file does not exist, a new one will be created: {}".format(state_file), "INFO")
@@ -151,18 +234,16 @@ def LoadAlertDictionaryList(state_file):
     try:
         alert_dictionary_list = json.loads(content)
     except ValueError as error:
-        WriteLog("Failed to parse state file {}: {}".format(state_file, error), "ERROR")
+        return RecoverInvalidStateFile(state_file, error)
+
+    try:
+        ValidateAlertDictionaryList(alert_dictionary_list)
+    except ValueError as error:
+        if not isinstance(alert_dictionary_list, list):
+            return RecoverInvalidStateFile(state_file, error)
         raise
 
-    if not isinstance(alert_dictionary_list, list):
-        raise ValueError("Invalid state structure: root element must be a list")
-
-    for alert_dictionary in alert_dictionary_list:
-        if not isinstance(alert_dictionary, dict):
-            raise ValueError("Invalid state structure: each list item must be a dictionary")
-
     return alert_dictionary_list
-
 
 def SaveAlertDictionaryList(state_file, alert_dictionary_list):
     try:
@@ -221,6 +302,8 @@ def CheckAddArgs(args):
     CheckRequiredValue(args.trig_name, "--trigName")
     CheckRequiredValue(args.message, "--message")
     CheckRequiredValue(args.severity, "--severity")
+    if str(args.severity) == "5":
+        CheckRequiredValue(args.eventid, "--eventid")
 
 
 def CheckSelectArgs(args):
@@ -250,7 +333,7 @@ def CreateEventOneAlertData(args):
         "action": CopyDictionary(action_template),
         "eventBalance": 1,
         "criticalEventBalance": 0,
-        "zeroBalanceTime": ""
+        "zeroRecaveryBalance": ""
     }
     return alert_data
 
@@ -275,6 +358,7 @@ def ApplyEventOneToAlertList(alert_dictionary_list, root_key, args):
     if alert_dictionary is None:
         alert_data = CreateEventOneAlertData(args)
         if new_severity == 5:
+            alert_data["criticalEventIds"] = [str(args.eventid)]
             alert_data["criticalEventBalance"] = 1
         alert_dictionary_list.append({root_key: alert_data.copy()})
         WriteLog("Root key {} added with event balance {} and critical event balance {}".format(
@@ -294,12 +378,19 @@ def ApplyEventOneToAlertList(alert_dictionary_list, root_key, args):
     old_severity = alert_data.get("severity", "0")
     old_severity = GetIntegerValue(old_severity, "severity")
 
-    alert_data["eventBalance"] = old_event_balance + 1
-    alert_data["zeroBalanceTime"] = ""
     if new_severity == 5:
-        alert_data["criticalEventBalance"] = old_critical_event_balance + 1
+        critical_event_ids = alert_data.setdefault("criticalEventIds", [])
+        if str(args.eventid) in critical_event_ids:
+            WriteLog("Event id {} already exists for root key {}, balances unchanged".format(args.eventid, root_key), "INFO")
+        else:
+            critical_event_ids.append(str(args.eventid))
+            alert_data["eventBalance"] = old_event_balance + 1
+            alert_data["criticalEventBalance"] = old_critical_event_balance + 1
+            alert_data["zeroRecaveryBalance"] = ""
     else:
+        alert_data["eventBalance"] = old_event_balance + 1
         alert_data["criticalEventBalance"] = old_critical_event_balance
+        alert_data["zeroRecaveryBalance"] = ""
 
     if "action" not in alert_data:
         alert_data["action"] = GetActionTemplate(args.template)
@@ -311,6 +402,12 @@ def ApplyEventOneToAlertList(alert_dictionary_list, root_key, args):
         alert_data["eventBalance"],
         alert_data["criticalEventBalance"]
     ), "INFO")
+
+
+def GetZeroRecaveryBalanceTimeValue(args):
+    if args.event_recovery_time is None or str(args.event_recovery_time).strip() == "":
+        return args.trigger_time
+    return args.event_recovery_time
 
 
 def ApplyEventZeroToAlertList(alert_dictionary_list, root_key, args):
@@ -329,22 +426,23 @@ def ApplyEventZeroToAlertList(alert_dictionary_list, root_key, args):
     old_event_balance = GetExistingEventBalance(alert_data)
     old_critical_event_balance = GetExistingCriticalEventBalance(alert_data)
 
-    if old_event_balance == 0:
-        WriteLog("Event balance is already zero for root key {}, nothing changed".format(root_key), "ERROR")
-        return
-
-    if severity_value == 5 and old_critical_event_balance == 0:
-        WriteLog("Critical event balance is already zero for root key {}, nothing changed".format(root_key), "ERROR")
-        return
-
-    alert_data["eventBalance"] = old_event_balance - 1
-    if alert_data["eventBalance"] == 0:
-        alert_data["zeroBalanceTime"] = args.trigger_time
-
     if severity_value == 5:
-        alert_data["criticalEventBalance"] = old_critical_event_balance - 1
+        critical_event_ids = alert_data.setdefault("criticalEventIds", [])
+        if str(args.eventid) not in critical_event_ids:
+            WriteLog("Event id {} was not found for root key {}, balances unchanged".format(args.eventid, root_key), "WARNING")
+            return
+        critical_event_ids.remove(str(args.eventid))
+        alert_data["eventBalance"] = max(0, old_event_balance - 1)
+        alert_data["criticalEventBalance"] = max(0, old_critical_event_balance - 1)
     else:
+        if old_event_balance == 0:
+            WriteLog("Event balance is already zero for root key {}, nothing changed".format(root_key), "ERROR")
+            return
+        alert_data["eventBalance"] = max(0, old_event_balance - 1)
         alert_data["criticalEventBalance"] = old_critical_event_balance
+
+    if alert_data["eventBalance"] == 0:
+        alert_data["zeroRecaveryBalance"] = GetZeroRecaveryBalanceTimeValue(args)
 
     WriteLog("Root key {} decreased, event balance is {}, critical event balance is {}".format(
         root_key,
@@ -501,7 +599,14 @@ def DeleteAlertDictionaryByRootKey(args):
     SaveAlertDictionaryList(args.state_file, new_alert_dictionary_list)
 
 
+def LogAddArguments(args):
+    argument_dictionary = vars(args)
+    for argument_name in sorted(argument_dictionary):
+        WriteLog("add argument {}: {}".format(argument_name, argument_dictionary[argument_name]), "INFO")
+
+
 def UpdateAlertDictionaryList(args):
+    LogAddArguments(args)
     CheckAddArgs(args)
     root_keys = ExtractRootKeysFromGroups(args.groups)
 
@@ -707,6 +812,87 @@ def UpdateAlertDictionaryValue(args):
         print(json.dumps({"added": added_severity_action_keys}, ensure_ascii=False))
 
 
+DATETIME_FORMAT = "%Y.%m.%d %H:%M:%S"
+DEFAULT_DELETE_DELAY_MINUTES = 30
+DELETE_DELAY_RULES = [
+    {"name": "night_period", "weekdays": None, "start_time": "21:00", "end_time": "09:00", "delay_minutes": 180},
+    {"name": "weekend", "weekdays": [5, 6], "start_time": None, "end_time": None, "delay_minutes": 180}
+]
+
+def ParseTimeValue(value):
+    return datetime.datetime.strptime(value, DATETIME_FORMAT)
+
+def CheckTimeRangeForDelete(check_time, start_value, end_value):
+    if start_value is None and end_value is None:
+        return True
+    start_time = datetime.datetime.strptime(start_value, "%H:%M").time() if start_value is not None else None
+    end_time = datetime.datetime.strptime(end_value, "%H:%M").time() if end_value is not None else None
+    if start_time is not None and end_time is None:
+        return check_time >= start_time
+    if start_time is None and end_time is not None:
+        return check_time < end_time
+    if start_time <= end_time:
+        return start_time <= check_time < end_time
+    return check_time >= start_time or check_time < end_time
+
+def GetDeleteDelayMinutes(zero_recavery_balance_datetime):
+    delays = []
+    for rule in DELETE_DELAY_RULES:
+        weekdays = rule.get("weekdays")
+        if weekdays is not None and zero_recavery_balance_datetime.weekday() not in weekdays:
+            continue
+        if CheckTimeRangeForDelete(zero_recavery_balance_datetime.time(), rule.get("start_time"), rule.get("end_time")):
+            delays.append(rule.get("delay_minutes", DEFAULT_DELETE_DELAY_MINUTES))
+    if not delays:
+        return DEFAULT_DELETE_DELAY_MINUTES
+    return max(delays)
+
+def MakeDeleteReadyResponse(deleted, key, reason):
+    return {"deleted": deleted, "key": key, "reason": reason}
+
+def DeleteReadyAlertDictionaryByRootKey(args):
+    CheckDeleteArgs(args)
+    alert_dictionary_list = LoadAlertDictionaryList(args.state_file)
+    alert_dictionary = FindAlertDictionaryByRootKey(alert_dictionary_list, args.key)
+    if alert_dictionary is None:
+        response = MakeDeleteReadyResponse(False, args.key, "root key was not found")
+        print(json.dumps(response, ensure_ascii=False, indent=4))
+        return
+    alert_data = alert_dictionary[args.key]
+    added = AddSeverityActionTemplateKeysByJsonPath(alert_dictionary_list, "$." + args.key)
+    if added:
+        SaveAlertDictionaryList(args.state_file, alert_dictionary_list)
+    action_dictionary = alert_data.get("action")
+    if not isinstance(action_dictionary, dict):
+        raise ValueError("Action value is not a dictionary for root key {}".format(args.key))
+    for action_name in GetSeverityActionKeys(alert_data):
+        action_data = action_dictionary.get(action_name)
+        if not isinstance(action_data, dict):
+            raise ValueError("action {} has invalid structure".format(action_name))
+        step_state = int(action_data.get("stepSate", 0))
+        if step_state != 1:
+            print(json.dumps(MakeDeleteReadyResponse(False, args.key, "action {} has stepSate {}".format(action_name, step_state)), ensure_ascii=False, indent=4))
+            return
+    if int(alert_data.get("eventBalance", 0)) != 0:
+        print(json.dumps(MakeDeleteReadyResponse(False, args.key, "eventBalance is not zero"), ensure_ascii=False, indent=4))
+        return
+    if int(alert_data.get("criticalEventBalance", 0)) != 0:
+        print(json.dumps(MakeDeleteReadyResponse(False, args.key, "criticalEventBalance is not zero"), ensure_ascii=False, indent=4))
+        return
+    zero_recavery_balance = alert_data.get("zeroRecaveryBalance")
+    if zero_recavery_balance is None or str(zero_recavery_balance).strip() == "":
+        print(json.dumps(MakeDeleteReadyResponse(False, args.key, "zeroRecaveryBalance is empty"), ensure_ascii=False, indent=4))
+        return
+    zero_recavery_balance_datetime = ParseTimeValue(zero_recavery_balance)
+    delay_minutes = GetDeleteDelayMinutes(zero_recavery_balance_datetime)
+    age_minutes = int((datetime.datetime.now() - zero_recavery_balance_datetime).total_seconds() / 60)
+    if age_minutes < delay_minutes:
+        print(json.dumps(MakeDeleteReadyResponse(False, args.key, "package age is less than delete delay"), ensure_ascii=False, indent=4))
+        return
+    new_list = [item for item in alert_dictionary_list if args.key not in item]
+    SaveAlertDictionaryList(args.state_file, new_list)
+    print(json.dumps(MakeDeleteReadyResponse(True, args.key, ""), ensure_ascii=False, indent=4))
+
 ############################### BODY ###############################
 
 
@@ -731,6 +917,8 @@ def Main():
             SelectAlertDictionaryList(args)
         elif args.mode == "del":
             DeleteAlertDictionaryByRootKey(args)
+        elif args.mode == "del-ready":
+            DeleteReadyAlertDictionaryByRootKey(args)
         elif args.mode == "update":
             UpdateAlertDictionaryValue(args)
         else:

@@ -8,6 +8,11 @@ import os
 import subprocess
 import sys
 
+try:
+    from config.local_settings_and_secrets import CLI_COMMAND_TIMEOUT_SECONDS
+except ImportError:
+    CLI_COMMAND_TIMEOUT_SECONDS = 10
+
 
 ############################### VARS ###############################
 
@@ -35,7 +40,7 @@ DELETE_CONDITIONS = [
         "value": 0
     },
     {
-        "field": "zeroBalanceTime",
+        "field": "zeroRecaveryBalance",
         "operator": "not_empty"
     }
 ]
@@ -90,8 +95,12 @@ def RunCliCommand(command):
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            timeout=CLI_COMMAND_TIMEOUT_SECONDS
         )
+    except subprocess.TimeoutExpired as error:
+        WriteLog("CLI command timed out after {} seconds: {}".format(CLI_COMMAND_TIMEOUT_SECONDS, error), "ERROR")
+        return subprocess.CompletedProcess(command, 1, "", str(error))
     except OSError as error:
         WriteLog("Failed to run CLI command: {}".format(error), "ERROR")
         raise
@@ -271,17 +280,17 @@ def CheckTimeRange(check_time, start_time_value, end_time_value, rule_name):
     return check_time >= start_time or check_time < end_time
 
 
-def CheckDelayRule(zero_balance_datetime, rule):
+def CheckDelayRule(zero_recavery_balance_datetime, rule):
     rule_name = rule.get("name", "unknown")
     weekdays = rule.get("weekdays")
 
     if weekdays is not None:
-        if zero_balance_datetime.weekday() not in weekdays:
+        if zero_recavery_balance_datetime.weekday() not in weekdays:
             WriteLog("Delay rule {} does not match weekday".format(rule_name), "INFO")
             return False
 
     if not CheckTimeRange(
-        zero_balance_datetime.time(),
+        zero_recavery_balance_datetime.time(),
         rule.get("start_time"),
         rule.get("end_time"),
         rule_name
@@ -293,12 +302,12 @@ def CheckDelayRule(zero_balance_datetime, rule):
     return True
 
 
-def GetDeleteDelay(zero_balance_datetime):
+def GetDeleteDelay(zero_recavery_balance_datetime):
     matched_rule_names = []
     matched_delay_minutes = []
 
     for rule in DELETE_DELAY_RULES:
-        if CheckDelayRule(zero_balance_datetime, rule):
+        if CheckDelayRule(zero_recavery_balance_datetime, rule):
             matched_rule_names.append(rule.get("name", "unknown"))
             matched_delay_minutes.append(rule.get("delay_minutes", DEFAULT_DELETE_DELAY_MINUTES))
 
@@ -314,21 +323,21 @@ def GetDeleteDelay(zero_balance_datetime):
 
 
 def CheckPackageAge(alert_data):
-    zero_balance_time = alert_data.get("zeroBalanceTime")
+    zero_recavery_balance = alert_data.get("zeroRecaveryBalance")
 
     try:
-        zero_balance_datetime = ParseTimeValue(zero_balance_time)
+        zero_recavery_balance_datetime = ParseTimeValue(zero_recavery_balance)
     except (TypeError, ValueError) as error:
-        WriteLog("Invalid zeroBalanceTime value {}: {}".format(zero_balance_time, error), "ERROR")
+        WriteLog("Invalid zeroRecaveryBalance value {}: {}".format(zero_recavery_balance, error), "ERROR")
         return False, 0, 0, []
 
     now = datetime.datetime.now()
-    if zero_balance_datetime > now:
-        WriteLog("zeroBalanceTime is in the future: {}".format(zero_balance_time), "WARNING")
+    if zero_recavery_balance_datetime > now:
+        WriteLog("zeroRecaveryBalance is in the future: {}".format(zero_recavery_balance), "WARNING")
         return False, 0, 0, []
 
-    delete_delay_minutes, matched_rule_names = GetDeleteDelay(zero_balance_datetime)
-    age = now - zero_balance_datetime
+    delete_delay_minutes, matched_rule_names = GetDeleteDelay(zero_recavery_balance_datetime)
+    age = now - zero_recavery_balance_datetime
     age_minutes = int(age.total_seconds() / 60)
     WriteLog("Package age minutes: {}".format(age_minutes), "INFO")
 
@@ -361,6 +370,29 @@ def DeletePackage(args, root_key):
     return True
 
 
+def DeleteReadyPackage(args, root_key):
+    command = [
+        sys.executable,
+        args.cli_path,
+        "del-ready",
+        "--state-file",
+        args.state_file,
+        "--key",
+        root_key
+    ]
+    result = RunCliCommand(command)
+    if result.returncode != 0:
+        WriteLog("del-ready failed for root key {} with code {}".format(root_key, result.returncode), "ERROR")
+        WriteLog("del-ready stderr: {}".format(result.stderr.strip()), "ERROR")
+        WriteLog("del-ready stdout: {}".format(result.stdout.strip()), "ERROR")
+        return None
+    try:
+        return json.loads(result.stdout)
+    except ValueError as error:
+        WriteLog("del-ready stdout is not valid JSON for root key {}: {}".format(root_key, error), "ERROR")
+        return None
+
+
 def ProcessPackage(args, root_key, alert_data, counters):
     counters["processed"] = counters["processed"] + 1
     WriteLog("Processing root key: {}".format(root_key), "INFO")
@@ -370,46 +402,19 @@ def ProcessPackage(args, root_key, alert_data, counters):
         counters["errors"] = counters["errors"] + 1
         return
 
-    severity_actions_result = AddSeverityActions(args, root_key)
-    if not severity_actions_result:
+    response = DeleteReadyPackage(args, root_key)
+    if response is None:
         counters["errors"] = counters["errors"] + 1
         return
-
-    severity_actions_added = severity_actions_result[1]
-    if severity_actions_added > 0:
-        counters["actions_added"] = counters["actions_added"] + 1
-
-    if not CheckActionsCompleted(root_key, alert_data):
-        counters["skipped"] = counters["skipped"] + 1
-        WriteLog("Root key {} was not deleted because actions are not completed".format(root_key), "INFO")
-        return
-
-    if not CheckDeleteConditions(alert_data):
-        counters["skipped"] = counters["skipped"] + 1
-        WriteLog("Root key {} was not deleted because delete conditions failed".format(root_key), "INFO")
-        return
-
-    should_delete, age_minutes, delay_minutes, matched_rule_names = CheckPackageAge(alert_data)
-    if not should_delete:
-        counters["skipped"] = counters["skipped"] + 1
-        WriteLog("Root key {} was not deleted because age check failed".format(root_key), "INFO")
-        return
-
-    if DeletePackage(args, root_key):
+    if response.get("deleted") is True:
         counters["deleted"] = counters["deleted"] + 1
-        zero_balance_time = alert_data.get("zeroBalanceTime")
-        if len(matched_rule_names) == 0:
-            rule_text = "default delay"
-        else:
-            rule_text = ", ".join(matched_rule_names)
         WriteLog("Deleted root key {}".format(root_key), "INFO")
-        WriteLog("Deleted root key {} zeroBalanceTime: {}".format(root_key, zero_balance_time), "INFO")
-        WriteLog("Deleted root key {} age minutes: {}".format(root_key, age_minutes), "INFO")
-        WriteLog("Deleted root key {} delay minutes: {}".format(root_key, delay_minutes), "INFO")
-        WriteLog("Deleted root key {} matched rules: {}".format(root_key, rule_text), "INFO")
     else:
-        counters["errors"] = counters["errors"] + 1
-
+        counters["skipped"] = counters["skipped"] + 1
+        reason = response.get("reason", "")
+        if reason.startswith("action") and "has stepSate 0" in reason:
+            counters["actions_added"] = counters["actions_added"] + 1
+        WriteLog("Root key {} was not deleted: {}".format(root_key, reason), "INFO")
 
 def ProcessAlertPackages(args, alert_dictionary_list):
     counters = {
