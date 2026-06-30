@@ -16,7 +16,6 @@ CLI_PATH_DEFAULT = os.path.join(
     "alios.py"
 )
 STATE_FILE_DEFAULT = "/tmp/alerts.json"
-LOG_FILE = "/tmp/alerts_watcher.log"
 VERBOSE = False
 
 DATETIME_FORMAT = "%Y.%m.%d %H:%M:%S"
@@ -74,15 +73,12 @@ def GetArgs():
 
 
 def WriteLog(message, level):
+    if not VERBOSE:
+        return
+
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     log_message = "{} [{}] {}".format(now, level, message)
-
-    file = open(LOG_FILE, "a", encoding="utf-8")
-    file.write(log_message + "\n")
-    file.close()
-
-    if VERBOSE:
-        print(log_message)
+    print(log_message)
 
 
 ############################### FUNCTIONS ###############################

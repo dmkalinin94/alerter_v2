@@ -34,14 +34,31 @@ def GetArgs():
 ############################### LOGS ###############################
 
 
-def WriteLog(message, level):
+def WriteLog(message, level, component="actor"):
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_message = "{} [{}] {}".format(now, level, message)
+    log_message = "{} [{}] {}: {}".format(now, level, component, message)
     file = open(LOG_FILE, "a", encoding="utf-8")
     file.write(log_message + "\n")
     file.close()
     if VERBOSE:
         print(log_message)
+
+
+def WriteComponentOutput(component, output, default_level):
+    for line in output.splitlines():
+        stripped_line = line.strip()
+        if stripped_line == "":
+            continue
+
+        level = default_level
+        message = stripped_line
+        marker_start = stripped_line.find("[")
+        marker_end = stripped_line.find("]")
+        if marker_start >= 0 and marker_end > marker_start:
+            level = stripped_line[marker_start + 1:marker_end]
+            message = stripped_line[marker_end + 1:].strip()
+
+        WriteLog(message, level, component)
 
 
 ############################### FUNCTIONS ###############################
@@ -64,15 +81,14 @@ def RunWatcher(args):
         "--state-file",
         args.state_file
     ]
-    if args.verbose:
-        command.append("-v")
+    command.append("-v")
 
     WriteLog("Starting watcher: {}".format(" ".join(command)), "INFO")
     result = RunCommand(command)
+    WriteComponentOutput("watcher", result.stdout, "INFO")
+    WriteComponentOutput("watcher", result.stderr, "ERROR")
     WriteLog("Watcher finished with code {}".format(result.returncode), "INFO")
     if result.returncode != 0:
-        WriteLog("Watcher stderr: {}".format(result.stderr.strip()), "ERROR")
-        WriteLog("Watcher stdout: {}".format(result.stdout.strip()), "ERROR")
         return False
     return True
 
@@ -144,7 +160,7 @@ def HandleInsightID(root_key, action_data):
         root_key,
         result.get("success"),
         result.get("errorMessage", "")
-    ), "INFO")
+    ), "INFO", "db")
 
     if result.get("success") is True:
         return True, {

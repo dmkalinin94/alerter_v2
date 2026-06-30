@@ -13,7 +13,7 @@ import sys
 ############################### VARS ###############################
 
 STATE_FILE_DEFAULT = "/tmp/alerts.json"
-LOG_FILE = "/tmp/alerts.log"
+LOG_FILE = "/tmp/alios.log"
 VERBOSE = False
 GROUP_PATTERN = r"SG/([^,/]+)"
 

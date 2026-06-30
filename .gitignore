@@ -1,4 +1,4 @@
 .env
-config/secrets.py
+config/local_settings_and_secrets.py
 __pycache__/
 *.pyc
