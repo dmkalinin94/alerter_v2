@@ -14,6 +14,7 @@ import sys
 
 import alios
 import db
+import insight
 
 try:
     from config.local_settings_and_secrets import (
@@ -203,7 +204,7 @@ def GetRetryNumber(action_data):
     except (TypeError, ValueError):
         return 0
 
-def HandleInsightID(root_key, action_data):
+def HandleInsightID(root_key, alert_data, action_data):
     retry_number = action_data.get("retryNumber", 0)
     try:
         retry_number = int(retry_number)
@@ -233,11 +234,35 @@ def HandleInsightID(root_key, action_data):
     }
 
 
+def HandleInsightData(root_key, alert_data, action_data):
+    retry_number = GetRetryNumber(action_data)
+    WriteLog("InsightData started for root key {}".format(root_key), "INFO")
+    try:
+        insight_id_data = alert_data["action"]["InsightID"]
+        if insight_id_data.get("stepSate") != 1:
+            raise ValueError("InsightID action is not completed")
+        insight_id = insight_id_data.get("insightId")
+        if not isinstance(insight_id, str) or insight_id.strip() == "":
+            raise ValueError("InsightID insightId is empty")
+        insight_id = insight_id.strip()
+    except Exception as error:
+        error_message = str(error)[:2000]
+        WriteLog("InsightData structure error for root key {}: {}".format(root_key, error_message), "ERROR")
+        return False, {"stepSate": 2, "errorMessage": error_message, "retryNumber": retry_number + 1, "isActiv": 0, "recipientADUserList": []}
+
+    WriteLog("InsightData uses insight_id {} for root key {}".format(insight_id, root_key), "INFO")
+    result = insight.GetInsightData(insight_id)
+    error_message = insight.MaskSensitiveText(result.get("errorMessage", ""))[:2000]
+    if result.get("success") is True:
+        WriteLog("InsightData completed for root key {} isActiv={} recipients={}".format(root_key, result.get("isActiv", 0), len(result.get("recipientADUserList", []))), "INFO")
+        return True, {"stepSate": 1, "errorMessage": "", "retryNumber": retry_number, "isActiv": int(result.get("isActiv", 0)), "recipientADUserList": result.get("recipientADUserList", [])}
+
+    WriteLog("InsightData error for root key {}: {}".format(root_key, error_message), "ERROR")
+    return False, {"stepSate": 2, "errorMessage": error_message, "retryNumber": retry_number + 1, "isActiv": 0, "recipientADUserList": []}
+
+
 def GetActionOrder(alert_data):
-    severity_key = str(alert_data.get("severity"))
-    if severity_key not in alios.SEVERITY_ACTION:
-        raise ValueError("Unknown severity: {}".format(severity_key))
-    return alios.SEVERITY_ACTION[severity_key]
+    return alios.GetRequiredActionKeys(alert_data)
 
 
 def ProcessPackage(args, root_key, alert_data, counters, handlers):
@@ -294,7 +319,7 @@ def ProcessPackage(args, root_key, alert_data, counters, handlers):
             return
 
         try:
-            success, new_action_data = handlers[action_name](root_key, action_data)
+            success, new_action_data = handlers[action_name](root_key, alert_data, action_data)
         except Exception as error:
             WriteLog("Action {} raised exception for root key {}: {}".format(action_name, root_key, error), "ERROR")
             WriteLog(traceback.format_exc(), "ERROR")
@@ -320,7 +345,7 @@ def ProcessPackage(args, root_key, alert_data, counters, handlers):
 
 
 def ProcessAlertPackages(args, alert_dictionary_list):
-    handlers = {"InsightID": HandleInsightID}
+    handlers = {"InsightID": HandleInsightID, "InsightData": HandleInsightData}
     counters = {
         "processed": 0,
         "actions_success": 0,

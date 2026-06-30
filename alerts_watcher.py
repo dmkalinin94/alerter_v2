@@ -145,7 +145,7 @@ def LoadAlertPackages(args):
     return alert_dictionary_list
 
 
-def AddSeverityActions(args, root_key):
+def AddRequiredActions(args, root_key):
     command = [
         sys.executable,
         args.cli_path,
@@ -154,12 +154,12 @@ def AddSeverityActions(args, root_key):
         args.state_file,
         "--path",
         "$." + root_key,
-        "--severity-actions"
+        "--required-actions"
     ]
     result = RunCliCommand(command)
 
     if result.returncode != 0:
-        WriteLog("Failed to add severity actions for root key {}".format(root_key), "ERROR")
+        WriteLog("Failed to add required actions for root key {}".format(root_key), "ERROR")
         WriteLog("CLI update return code: {}".format(result.returncode), "ERROR")
         WriteLog("CLI update stderr: {}".format(result.stderr.strip()), "ERROR")
         WriteLog("CLI update stdout: {}".format(result.stdout.strip()), "ERROR")
@@ -171,10 +171,8 @@ def AddSeverityActions(args, root_key):
         result_data = {}
 
     added_actions = result_data.get("added", [])
-    if len(added_actions) == 0:
-        WriteLog("No severity actions were added for root key {}".format(root_key), "INFO")
-    else:
-        WriteLog("Added severity actions for root key {}: {}".format(root_key, ", ".join(added_actions)), "INFO")
+    stage = result_data.get("stage", "")
+    WriteLog("Required actions result for root key {}: stage={}, added={}, count={}".format(root_key, stage, ", ".join(added_actions), len(added_actions)), "INFO")
 
     return True, len(added_actions)
 
@@ -402,6 +400,12 @@ def ProcessPackage(args, root_key, alert_data, counters):
         counters["errors"] = counters["errors"] + 1
         return
 
+    add_result = AddRequiredActions(args, root_key)
+    if add_result is False:
+        counters["errors"] = counters["errors"] + 1
+        return
+    counters["actions_added"] = counters["actions_added"] + add_result[1]
+
     response = DeleteReadyPackage(args, root_key)
     if response is None:
         counters["errors"] = counters["errors"] + 1
@@ -412,8 +416,6 @@ def ProcessPackage(args, root_key, alert_data, counters):
     else:
         counters["skipped"] = counters["skipped"] + 1
         reason = response.get("reason", "")
-        if reason.startswith("action") and "has stepSate 0" in reason:
-            counters["actions_added"] = counters["actions_added"] + 1
         WriteLog("Root key {} was not deleted: {}".format(root_key, reason), "INFO")
 
 def ProcessAlertPackages(args, alert_dictionary_list):

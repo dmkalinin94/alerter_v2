@@ -23,25 +23,18 @@ LOG_FILE = "/tmp/alios.log"
 VERBOSE = False
 GROUP_PATTERN = r"SG/([^,/]+)"
 
+BASE_ACTIONS = [
+    "InsightID",
+    "InsightData"
+]
+
 SEVERITY_ACTION = {
-    "0": [
-        "InsightID"
-    ],
-    "1": [
-        "InsightID"
-    ],
-    "2": [
-        "InsightID"
-    ],
-    "3": [
-        "InsightID"
-    ],
-    "4": [
-        "InsightID"
-    ],
-    "5": [
-        "InsightID"
-    ]
+    "0": [],
+    "1": [],
+    "2": [],
+    "3": [],
+    "4": [],
+    "5": []
 }
 ACTION_TEMPLATE_INC = {
     "InsightID": {
@@ -49,6 +42,13 @@ ACTION_TEMPLATE_INC = {
         "errorMessage": "",
         "retryNumber": 0,
         "insightId": ""
+    },
+    "InsightData": {
+        "stepSate": 0,
+        "errorMessage": "",
+        "retryNumber": 0,
+        "isActiv": 0,
+        "recipientADUserList": []
     }
 }
 
@@ -76,6 +76,7 @@ def GetArgs():
     parser.add_argument("--json-data", dest="json_data")
     parser.add_argument("-a", dest="action_keys")
     parser.add_argument("--severity-actions", dest="severity_actions", action="store_true")
+    parser.add_argument("--required-actions", dest="required_actions", action="store_true")
     parser.add_argument("-l", dest="list_key")
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser
@@ -211,6 +212,15 @@ def ValidateAlertDictionaryList(alert_dictionary_list, recover_whole_file=False)
                 raise ValueError("Invalid stepSate for action {} root key {}".format(action_name, root_key))
             if int(action_data.get("retryNumber", 0)) < 0:
                 raise ValueError("Invalid retryNumber for action {} root key {}".format(action_name, root_key))
+            if action_name == "InsightData":
+                if int(action_data.get("isActiv", 0)) not in (0, 1):
+                    raise ValueError("Invalid isActiv for action {} root key {}".format(action_name, root_key))
+                recipients = action_data.get("recipientADUserList", [])
+                if not isinstance(recipients, list):
+                    raise ValueError("recipientADUserList is not a list for root key {}".format(root_key))
+                for recipient in recipients:
+                    if not isinstance(recipient, str) or recipient.strip() == "":
+                        raise ValueError("Invalid recipientADUserList item for root key {}".format(root_key))
         if "criticalEventIds" in alert_data and not isinstance(alert_data["criticalEventIds"], list):
             raise ValueError("criticalEventIds is not a list for root key {}".format(root_key))
     return True
@@ -316,8 +326,8 @@ def CheckDeleteArgs(args):
 
 def CheckUpdateArgs(args):
     CheckRequiredValue(args.path, "--path")
-    if args.data is None and args.json_data is None and args.action_keys is None and not args.severity_actions:
-        raise ValueError("Required argument is missing: --data, --json-data, -a or --severity-actions")
+    if args.data is None and args.json_data is None and args.action_keys is None and not args.severity_actions and not args.required_actions:
+        raise ValueError("Required argument is missing: --data, --json-data, -a, --required-actions or --severity-actions")
 
 
 def CreateEventOneAlertData(args):
@@ -783,6 +793,61 @@ def AddSeverityActionTemplateKeysByJsonPath(alert_dictionary_list, json_path):
     return added_action_keys
 
 
+
+def GetActionStage(alert_data):
+    action_dictionary = alert_data.get("action", {})
+    insight_data = action_dictionary.get("InsightData") if isinstance(action_dictionary, dict) else None
+    if not isinstance(insight_data, dict):
+        return "insight_check"
+    step_state = int(insight_data.get("stepSate", 0))
+    if step_state != 1:
+        return "insight_check"
+    if int(insight_data.get("isActiv", 0)) == 1:
+        return "active_service"
+    return "inactive_service"
+
+
+def GetRequiredActionKeys(alert_data):
+    stage = GetActionStage(alert_data)
+    required_action_keys = list(BASE_ACTIONS)
+    if stage == "active_service":
+        for action_key in GetSeverityActionKeys(alert_data):
+            if action_key not in required_action_keys:
+                required_action_keys.append(action_key)
+    return required_action_keys
+
+
+def AddRequiredActionTemplateKeysByJsonPath(alert_dictionary_list, json_path):
+    root_key, nested_path = GetRootKeyAndNestedPath(alert_dictionary_list, json_path)
+
+    if len(nested_path) != 0:
+        raise ValueError("Required action keys can be added only to a first-level dictionary")
+
+    root_value = GetTopLevelValueByKey(alert_dictionary_list, root_key)
+    if not isinstance(root_value, dict):
+        raise ValueError("Selected root value is not a dictionary: {}".format(root_key))
+
+    if "action" not in root_value or root_value["action"] is None:
+        root_value["action"] = {}
+
+    if not isinstance(root_value["action"], dict):
+        raise ValueError("Action value is not a dictionary for root key {}".format(root_key))
+
+    required_action_keys = GetRequiredActionKeys(root_value)
+    added_action_keys = []
+
+    for action_key in required_action_keys:
+        if action_key not in ACTION_TEMPLATE_INC:
+            raise ValueError("Action template key was not found: {}".format(action_key))
+        if action_key in root_value["action"]:
+            WriteLog("Required action key {} already exists for root key {}, nothing changed".format(action_key, root_key), "INFO")
+            continue
+        root_value["action"][action_key] = CopyDictionary(ACTION_TEMPLATE_INC[action_key])
+        added_action_keys.append(action_key)
+        WriteLog("Required action key {} added to root key {}".format(action_key, root_key), "INFO")
+
+    return {"added": added_action_keys, "required": required_action_keys, "stage": GetActionStage(root_value)}
+
 def UpdateAlertDictionaryValue(args):
     CheckUpdateArgs(args)
     alert_dictionary_list = LoadAlertDictionaryList(args.state_file)
@@ -802,14 +867,14 @@ def UpdateAlertDictionaryValue(args):
     if args.action_keys is not None:
         AddActionTemplateKeysByJsonPath(alert_dictionary_list, args.path, args.action_keys)
 
-    added_severity_action_keys = []
-    if args.severity_actions:
-        added_severity_action_keys = AddSeverityActionTemplateKeysByJsonPath(alert_dictionary_list, args.path)
+    required_actions_result = None
+    if args.severity_actions or args.required_actions:
+        required_actions_result = AddRequiredActionTemplateKeysByJsonPath(alert_dictionary_list, args.path)
 
     SaveAlertDictionaryList(args.state_file, alert_dictionary_list)
 
-    if args.severity_actions:
-        print(json.dumps({"added": added_severity_action_keys}, ensure_ascii=False))
+    if args.severity_actions or args.required_actions:
+        print(json.dumps(required_actions_result, ensure_ascii=False))
 
 
 DATETIME_FORMAT = "%Y.%m.%d %H:%M:%S"
@@ -859,13 +924,10 @@ def DeleteReadyAlertDictionaryByRootKey(args):
         print(json.dumps(response, ensure_ascii=False, indent=4))
         return
     alert_data = alert_dictionary[args.key]
-    added = AddSeverityActionTemplateKeysByJsonPath(alert_dictionary_list, "$." + args.key)
-    if added:
-        SaveAlertDictionaryList(args.state_file, alert_dictionary_list)
     action_dictionary = alert_data.get("action")
     if not isinstance(action_dictionary, dict):
         raise ValueError("Action value is not a dictionary for root key {}".format(args.key))
-    for action_name in GetSeverityActionKeys(alert_data):
+    for action_name in GetRequiredActionKeys(alert_data):
         action_data = action_dictionary.get(action_name)
         if not isinstance(action_data, dict):
             raise ValueError("action {} has invalid structure".format(action_name))
