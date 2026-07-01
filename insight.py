@@ -148,20 +148,26 @@ def GetInsightData(insight_id, log_callback=None):
         )
         WriteInsightLog(log_callback, "Insight service HTTP status: {}".format(service_status_code), "INFO")
 
-        service_status, error_message = ExtractServiceStatus(service_attributes)
-        if error_message:
-            WriteInsightLog(log_callback, "Insight service response error: {}".format(error_message), "ERROR")
-            return MakeResult(False, 0, [], error_message)
-        WriteInsightLog(log_callback, "Insight service status value: {}".format(service_status), "INFO")
+        service_status, service_status_error = ExtractServiceStatus(service_attributes)
+        group_id, group_id_error = ExtractResponsibleGroupId(service_attributes)
+
+        if service_status_error:
+            WriteInsightLog(log_callback, "Insight service response error: {}".format(service_status_error), "ERROR")
+        else:
+            WriteInsightLog(log_callback, "Insight service status value: {}".format(service_status), "INFO")
+
+        if group_id_error:
+            WriteInsightLog(log_callback, "Insight service response error: {}".format(group_id_error), "ERROR")
+        else:
+            WriteInsightLog(log_callback, "Insight responsible group id: {}".format(group_id), "INFO")
+
+        if service_status_error:
+            return MakeResult(False, 0, [], service_status_error)
         if service_status != INSIGHT_ACTUAL_STATUS_VALUE:
             WriteInsightLog(log_callback, 'Service {} is not in status "{}"; responsible users loading skipped'.format(insight_id, INSIGHT_ACTUAL_STATUS_VALUE), "WARNING")
             return MakeResult(True, 0, [], "")
-
-        group_id, error_message = ExtractResponsibleGroupId(service_attributes)
-        if error_message:
-            WriteInsightLog(log_callback, "Insight service response error: {}".format(error_message), "ERROR")
-            return MakeResult(False, 0, [], error_message)
-        WriteInsightLog(log_callback, "Insight responsible group id: {}".format(group_id), "INFO")
+        if group_id_error:
+            return MakeResult(False, 0, [], group_id_error)
 
         group_headers = {"Content-Type": "application/json", "Authorization": INSIGHT_AUTH_TOKEN}
         group_url = FormatUrlTemplate(INSIGHT_GROUP_URL, "group_id", group_id)
