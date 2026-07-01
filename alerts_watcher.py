@@ -35,11 +35,6 @@ DELETE_CONDITIONS = [
         "value": 0
     },
     {
-        "field": "criticalEventBalance",
-        "operator": "equal",
-        "value": 0
-    },
-    {
         "field": "zeroRecaveryBalance",
         "operator": "not_empty"
     }
@@ -201,6 +196,29 @@ def CheckActionsCompleted(root_key, alert_data):
     WriteLog("All actions are completed for root key {}".format(root_key), "INFO")
     return True
 
+def IsCriticalEventActive(event_data):
+    if not isinstance(event_data, dict):
+        return True
+    end_time = event_data.get("endTime")
+    if end_time is None:
+        return True
+    if not isinstance(end_time, str):
+        return True
+    return end_time.strip() == ""
+
+
+def CheckCriticalEventClosed(root_key, alert_data):
+    critical_event = alert_data.get("criticalEvent")
+    if not isinstance(critical_event, dict):
+        WriteLog("Root key {} cannot be deleted because criticalEvent is missing or invalid".format(root_key), "ERROR")
+        return False
+    for event_id, event_data in critical_event.items():
+        if IsCriticalEventActive(event_data):
+            WriteLog("Root key {} cannot be deleted because critical event {} is still active".format(root_key, event_id), "INFO")
+            return False
+    WriteLog("Root key {} has no active critical events".format(root_key), "INFO")
+    return True
+
 def CheckDeleteCondition(alert_data, condition):
     field_name = condition.get("field")
     operator = condition.get("operator")
@@ -235,7 +253,10 @@ def CheckDeleteCondition(alert_data, condition):
     return False
 
 
-def CheckDeleteConditions(alert_data):
+def CheckDeleteConditions(alert_data, root_key):
+    if not CheckCriticalEventClosed(root_key, alert_data):
+        WriteLog("Package does not match delete conditions", "INFO")
+        return False
     for condition in DELETE_CONDITIONS:
         if not CheckDeleteCondition(alert_data, condition):
             WriteLog("Package does not match delete conditions", "INFO")

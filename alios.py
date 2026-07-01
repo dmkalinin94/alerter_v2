@@ -181,6 +181,64 @@ def RecoverInvalidStateFile(state_file, reason):
     return []
 
 
+def ValidateCriticalEventTime(value, field_name, root_key, event_id):
+    if value != "":
+        try:
+            datetime.datetime.strptime(value, "%Y.%m.%d %H:%M:%S")
+        except ValueError:
+            raise ValueError("Invalid {} for criticalEvent {} root key {}".format(field_name, event_id, root_key))
+
+
+def ValidateCriticalEventStructure(alert_data, root_key):
+    critical_event = alert_data.get("criticalEvent")
+    if not isinstance(critical_event, dict):
+        raise ValueError("criticalEvent is not a dictionary for root key {}".format(root_key))
+    for event_id, event_data in critical_event.items():
+        if not isinstance(event_id, str) or event_id.strip() == "":
+            raise ValueError("Invalid criticalEvent eventId for root key {}".format(root_key))
+        if not isinstance(event_data, dict):
+            raise ValueError("criticalEvent {} is not a dictionary for root key {}".format(event_id, root_key))
+        if "startTime" not in event_data or "endTime" not in event_data:
+            raise ValueError("criticalEvent {} misses startTime or endTime for root key {}".format(event_id, root_key))
+        start_time = event_data.get("startTime")
+        end_time = event_data.get("endTime")
+        if not isinstance(start_time, str) or start_time.strip() == "":
+            raise ValueError("Invalid startTime for criticalEvent {} root key {}".format(event_id, root_key))
+        if not isinstance(end_time, str):
+            raise ValueError("Invalid endTime for criticalEvent {} root key {}".format(event_id, root_key))
+        ValidateCriticalEventTime(start_time, "startTime", root_key, event_id)
+        ValidateCriticalEventTime(end_time.strip(), "endTime", root_key, event_id)
+
+
+def GetCriticalEvent(alert_data, root_key):
+    critical_event = alert_data.get("criticalEvent")
+    if not isinstance(critical_event, dict):
+        raise ValueError("criticalEvent is not a dictionary for root key {}".format(root_key))
+    return critical_event
+
+
+def IsCriticalEventActive(event_data):
+    if not isinstance(event_data, dict):
+        return True
+    end_time = event_data.get("endTime")
+    if end_time is None:
+        return True
+    if not isinstance(end_time, str):
+        return True
+    return end_time.strip() == ""
+
+
+def FindActiveCriticalEventId(alert_data, root_key=None):
+    critical_event = alert_data.get("criticalEvent")
+    if not isinstance(critical_event, dict):
+        if root_key is not None:
+            WriteLog("criticalEvent is missing or invalid for root key {}".format(root_key), "ERROR")
+        return None
+    for event_id, event_data in critical_event.items():
+        if IsCriticalEventActive(event_data):
+            return event_id
+    return None
+
 def ValidateAlertDictionaryList(alert_dictionary_list, recover_whole_file=False):
     if not isinstance(alert_dictionary_list, list):
         raise ValueError("Invalid state structure: root element must be a list")
@@ -198,10 +256,10 @@ def ValidateAlertDictionaryList(alert_dictionary_list, recover_whole_file=False)
         action_dictionary = alert_data.get("action", {})
         if action_dictionary is not None and not isinstance(action_dictionary, dict):
             raise ValueError("Invalid action dictionary for root key {}".format(root_key))
-        for field_name in ("eventBalance", "criticalEventBalance"):
-            value = int(alert_data.get(field_name, 0))
-            if value < 0:
-                raise ValueError("{} is negative for root key {}".format(field_name, root_key))
+        value = int(alert_data.get("eventBalance", 0))
+        if value < 0:
+            raise ValueError("eventBalance is negative for root key {}".format(root_key))
+        ValidateCriticalEventStructure(alert_data, root_key)
         severity_value = int(alert_data.get("severity", 0))
         if severity_value < 0 or severity_value > 5:
             raise ValueError("Invalid severity for root key {}".format(root_key))
@@ -221,8 +279,6 @@ def ValidateAlertDictionaryList(alert_dictionary_list, recover_whole_file=False)
                 for recipient in recipients:
                     if not isinstance(recipient, str) or recipient.strip() == "":
                         raise ValueError("Invalid recipientADUserList item for root key {}".format(root_key))
-        if "criticalEventIds" in alert_data and not isinstance(alert_data["criticalEventIds"], list):
-            raise ValueError("criticalEventIds is not a list for root key {}".format(root_key))
     return True
 
 def LoadAlertDictionaryList(state_file):
@@ -342,7 +398,7 @@ def CreateEventOneAlertData(args):
         "severity": args.severity,
         "action": CopyDictionary(action_template),
         "eventBalance": 1,
-        "criticalEventBalance": 0,
+        "criticalEvent": {},
         "zeroRecaveryBalance": ""
     }
     return alert_data
@@ -357,25 +413,20 @@ def GetExistingEventBalance(alert_data):
     return GetIntegerValue(alert_data.get("eventBalance", 0), "eventBalance")
 
 
-def GetExistingCriticalEventBalance(alert_data):
-    return GetIntegerValue(alert_data.get("criticalEventBalance", 0), "criticalEventBalance")
-
 
 def ApplyEventOneToAlertList(alert_dictionary_list, root_key, args):
     alert_dictionary = FindAlertDictionaryByRootKey(alert_dictionary_list, root_key)
     new_severity = GetIntegerValue(args.severity, "severity")
+    event_id = str(args.eventid)
 
     if alert_dictionary is None:
         alert_data = CreateEventOneAlertData(args)
         if new_severity == 5:
-            alert_data["criticalEventIds"] = [str(args.eventid)]
-            alert_data["criticalEventBalance"] = 1
+            alert_data["criticalEvent"][event_id] = {"startTime": args.trigger_time, "endTime": ""}
         alert_dictionary_list.append({root_key: alert_data.copy()})
-        WriteLog("Root key {} added with event balance {} and critical event balance {}".format(
-            root_key,
-            alert_data["eventBalance"],
-            alert_data["criticalEventBalance"]
-        ), "INFO")
+        WriteLog("Root key {} added with event balance {}".format(root_key, alert_data["eventBalance"]), "INFO")
+        if new_severity == 5:
+            WriteLog("Critical event opened for root key {} eventId {} startTime {} eventBalance {}".format(root_key, event_id, args.trigger_time, alert_data["eventBalance"]), "INFO")
         return
 
     alert_data = alert_dictionary[root_key]
@@ -384,22 +435,19 @@ def ApplyEventOneToAlertList(alert_dictionary_list, root_key, args):
 
     RemoveUnusedBalanceKey(alert_data)
     old_event_balance = GetExistingEventBalance(alert_data)
-    old_critical_event_balance = GetExistingCriticalEventBalance(alert_data)
-    old_severity = alert_data.get("severity", "0")
-    old_severity = GetIntegerValue(old_severity, "severity")
+    old_severity = GetIntegerValue(alert_data.get("severity", "0"), "severity")
 
     if new_severity == 5:
-        critical_event_ids = alert_data.setdefault("criticalEventIds", [])
-        if str(args.eventid) in critical_event_ids:
-            WriteLog("Event id {} already exists for root key {}, balances unchanged".format(args.eventid, root_key), "INFO")
+        critical_event = GetCriticalEvent(alert_data, root_key)
+        if event_id in critical_event:
+            WriteLog("Critical event {} already exists for root key {}, eventBalance unchanged".format(event_id, root_key), "WARNING")
         else:
-            critical_event_ids.append(str(args.eventid))
+            critical_event[event_id] = {"startTime": args.trigger_time, "endTime": ""}
             alert_data["eventBalance"] = old_event_balance + 1
-            alert_data["criticalEventBalance"] = old_critical_event_balance + 1
             alert_data["zeroRecaveryBalance"] = ""
+            WriteLog("Critical event opened for root key {} eventId {} startTime {} eventBalance {}".format(root_key, event_id, args.trigger_time, alert_data["eventBalance"]), "INFO")
     else:
         alert_data["eventBalance"] = old_event_balance + 1
-        alert_data["criticalEventBalance"] = old_critical_event_balance
         alert_data["zeroRecaveryBalance"] = ""
 
     if "action" not in alert_data:
@@ -407,11 +455,7 @@ def ApplyEventOneToAlertList(alert_dictionary_list, root_key, args):
     if new_severity > old_severity:
         alert_data["severity"] = args.severity
 
-    WriteLog("Root key {} updated, event balance is {}, critical event balance is {}".format(
-        root_key,
-        alert_data["eventBalance"],
-        alert_data["criticalEventBalance"]
-    ), "INFO")
+    WriteLog("Root key {} updated, event balance is {}".format(root_key, alert_data["eventBalance"]), "INFO")
 
 
 def GetZeroRecaveryBalanceTimeValue(args):
@@ -423,6 +467,7 @@ def GetZeroRecaveryBalanceTimeValue(args):
 def ApplyEventZeroToAlertList(alert_dictionary_list, root_key, args):
     alert_dictionary = FindAlertDictionaryByRootKey(alert_dictionary_list, root_key)
     severity_value = GetIntegerValue(args.severity, "severity")
+    event_id = str(args.eventid)
 
     if alert_dictionary is None:
         WriteLog("Root key {} was not found for event 0, nothing changed".format(root_key), "INFO")
@@ -434,31 +479,33 @@ def ApplyEventZeroToAlertList(alert_dictionary_list, root_key, args):
 
     RemoveUnusedBalanceKey(alert_data)
     old_event_balance = GetExistingEventBalance(alert_data)
-    old_critical_event_balance = GetExistingCriticalEventBalance(alert_data)
 
     if severity_value == 5:
-        critical_event_ids = alert_data.setdefault("criticalEventIds", [])
-        if str(args.eventid) not in critical_event_ids:
-            WriteLog("Event id {} was not found for root key {}, balances unchanged".format(args.eventid, root_key), "WARNING")
+        critical_event = GetCriticalEvent(alert_data, root_key)
+        if event_id not in critical_event:
+            WriteLog("Critical event {} was not found for root key {}, eventBalance unchanged".format(event_id, root_key), "WARNING")
             return
-        critical_event_ids.remove(str(args.eventid))
+        event_data = critical_event[event_id]
+        if not IsCriticalEventActive(event_data):
+            WriteLog("Critical event {} for root key {} is already closed, eventBalance unchanged".format(event_id, root_key), "WARNING")
+            return
+        end_time = args.event_recovery_time
+        if end_time is None or str(end_time).strip() == "":
+            end_time = args.trigger_time
+            WriteLog("eventRecoveryTime is empty for critical event {} root key {}, triggerTime will be used".format(event_id, root_key), "WARNING")
+        event_data["endTime"] = end_time
         alert_data["eventBalance"] = max(0, old_event_balance - 1)
-        alert_data["criticalEventBalance"] = max(0, old_critical_event_balance - 1)
+        WriteLog("Critical event closed for root key {} eventId {} endTime {} eventBalance {}".format(root_key, event_id, end_time, alert_data["eventBalance"]), "INFO")
     else:
         if old_event_balance == 0:
             WriteLog("Event balance is already zero for root key {}, nothing changed".format(root_key), "ERROR")
             return
         alert_data["eventBalance"] = max(0, old_event_balance - 1)
-        alert_data["criticalEventBalance"] = old_critical_event_balance
 
     if alert_data["eventBalance"] == 0:
         alert_data["zeroRecaveryBalance"] = GetZeroRecaveryBalanceTimeValue(args)
 
-    WriteLog("Root key {} decreased, event balance is {}, critical event balance is {}".format(
-        root_key,
-        alert_data["eventBalance"],
-        alert_data["criticalEventBalance"]
-    ), "INFO")
+    WriteLog("Root key {} decreased, event balance is {}".format(root_key, alert_data["eventBalance"]), "INFO")
 
 
 def GetTopLevelValueByKey(alert_dictionary_list, root_key):
@@ -938,8 +985,12 @@ def DeleteReadyAlertDictionaryByRootKey(args):
     if int(alert_data.get("eventBalance", 0)) != 0:
         print(json.dumps(MakeDeleteReadyResponse(False, args.key, "eventBalance is not zero"), ensure_ascii=False, indent=4))
         return
-    if int(alert_data.get("criticalEventBalance", 0)) != 0:
-        print(json.dumps(MakeDeleteReadyResponse(False, args.key, "criticalEventBalance is not zero"), ensure_ascii=False, indent=4))
+    active_critical_event_id = FindActiveCriticalEventId(alert_data, args.key)
+    if not isinstance(alert_data.get("criticalEvent"), dict):
+        print(json.dumps(MakeDeleteReadyResponse(False, args.key, "criticalEvent is missing or invalid"), ensure_ascii=False, indent=4))
+        return
+    if active_critical_event_id is not None:
+        print(json.dumps(MakeDeleteReadyResponse(False, args.key, "criticalEvent contains active event {}".format(active_critical_event_id)), ensure_ascii=False, indent=4))
         return
     zero_recavery_balance = alert_data.get("zeroRecaveryBalance")
     if zero_recavery_balance is None or str(zero_recavery_balance).strip() == "":
