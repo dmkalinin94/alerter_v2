@@ -251,7 +251,7 @@ def HandleInsightData(root_key, alert_data, action_data):
         return False, {"stepSate": 2, "errorMessage": error_message, "retryNumber": retry_number + 1, "isActiv": 0, "recipientADUserList": []}
 
     WriteLog("InsightData uses insight_id {} for root key {}".format(insight_id, root_key), "INFO")
-    result = insight.GetInsightData(insight_id)
+    result = insight.GetInsightData(insight_id, lambda message, level: WriteLog(message, level, "insight"))
     error_message = insight.MaskSensitiveText(result.get("errorMessage", ""))[:2000]
     if result.get("success") is True:
         WriteLog("InsightData completed for root key {} isActiv={} recipients={}".format(root_key, result.get("isActiv", 0), len(result.get("recipientADUserList", []))), "INFO")
