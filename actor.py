@@ -15,7 +15,7 @@ import sys
 import alios
 import db
 import insight
-import ktalk_users
+import mktapi
 import jira_inc
 import ktalk_message
 
@@ -333,7 +333,7 @@ def ProcessPackage(args, root_key, alert_data, counters, handlers):
 STEP_HANDLERS = {
     ("InsightID", "resolveInsightId"): HandleResolveInsightId,
     ("InsightData", "loadInsightData"): HandleLoadInsightData,
-    ("KTalkUsers", "resolveKTalkUsers"): ktalk_users.ResolveKTalkUsers,
+    ("KTalkUsers", "resolveKTalkUsers"): mktapi.ResolveKTalkUsers,
     ("JiraINC", "createLowSeverityJiraIncident"): jira_inc.CreateLowSeverityJiraIncident,
     ("JiraINC", "createCriticalJiraIncident"): jira_inc.CreateCriticalJiraIncident,
     ("KTalkMessage", "sendLowSeverityRootMessage"): ktalk_message.SendLowSeverityRootMessage,
