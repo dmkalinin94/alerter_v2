@@ -7,16 +7,10 @@ try:
 except ImportError:
     requests = None
 
-try:
-    from config.local_settings_and_secrets import (
-        RECIPIENT_RESOLVER_URL, RECIPIENT_RESOLVER_TIMEOUT_SECONDS,
-        RECIPIENT_RESOLVER_VERIFY_SSL, RECIPIENT_RESOLVER_TOKEN
-    )
-except ImportError:
-    RECIPIENT_RESOLVER_URL = ""
-    RECIPIENT_RESOLVER_TIMEOUT_SECONDS = 10
-    RECIPIENT_RESOLVER_VERIFY_SSL = True
-    RECIPIENT_RESOLVER_TOKEN = ""
+from config.local_settings_and_secrets import (
+    RECIPIENT_RESOLVER_URL, RECIPIENT_RESOLVER_TIMEOUT_SECONDS,
+    RECIPIENT_RESOLVER_VERIFY_SSL, RECIPIENT_RESOLVER_TOKEN
+)
 
 
 def MaskSensitiveText(text):

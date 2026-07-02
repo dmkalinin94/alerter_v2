@@ -37,10 +37,7 @@ SEVERITY_ACTION = {
     "5": ["resolveKTalkUsers", "createCriticalJiraIncident", "sendCriticalRootMessage", "sendCriticalAggregateMessage"]
 }
 
-try:
-    from config.local_settings_and_secrets import KTALK_AGGREGATE_MESSAGE_REPEAT_COUNT
-except ImportError:
-    KTALK_AGGREGATE_MESSAGE_REPEAT_COUNT = 3
+from config.local_settings_and_secrets import KTALK_AGGREGATE_MESSAGE_REPEAT_COUNT
 
 ACTION_STEP_TEMPLATES = {
     "resolveInsightId": {
