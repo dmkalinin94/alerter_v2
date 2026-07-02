@@ -7,6 +7,7 @@ try:
 except ImportError:
     requests = None
 
+from config.secret_masking import MaskSensitiveText as CommonMaskSensitiveText
 from config.local_settings_and_secrets import (
     RECIPIENT_RESOLVER_URL, RECIPIENT_RESOLVER_TIMEOUT_SECONDS,
     RECIPIENT_RESOLVER_VERIFY_SSL, RECIPIENT_RESOLVER_TOKEN
@@ -14,12 +15,7 @@ from config.local_settings_and_secrets import (
 
 
 def MaskSensitiveText(text):
-    safe = str(text)
-    for secret in (RECIPIENT_RESOLVER_TOKEN,):
-        if secret:
-            safe = safe.replace(secret, "***")
-    safe = re.sub(r"\bBearer\s+[^\s,;]+", "Bearer ***", safe)
-    return safe[:2000]
+    return CommonMaskSensitiveText(text)
 
 
 def NormalizeADLogin(login):

@@ -9,11 +9,7 @@ import os
 import re
 import sys
 
-try:
-    from config.local_settings_and_secrets import LOG_MAX_SIZE_BYTES, LOG_KEEP_SIZE_BYTES
-except ImportError:
-    LOG_MAX_SIZE_BYTES = 104857600
-    LOG_KEEP_SIZE_BYTES = 83886080
+from config.local_settings_and_secrets import LOG_KEEP_SIZE_BYTES, LOG_MAX_SIZE_BYTES
 
 
 ############################### VARS ###############################

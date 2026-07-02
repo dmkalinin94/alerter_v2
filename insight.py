@@ -4,6 +4,7 @@
 import json
 import re
 
+from config.secret_masking import MaskSensitiveText as CommonMaskSensitiveText
 from config.local_settings_and_secrets import (
     INSIGHT_ACTUAL_STATUS_VALUE, INSIGHT_AUTH_TOKEN,
     INSIGHT_FULL_NAME_ATTRIBUTE_ID, INSIGHT_FUNCTION_OBJECT_ATTRIBUTE_ID,
@@ -12,24 +13,10 @@ from config.local_settings_and_secrets import (
     INSIGHT_REQUEST_TIMEOUT_SECONDS, INSIGHT_RESPONSIBLE_GROUP_ATTRIBUTE_ID,
     INSIGHT_SERVICE_URL, INSIGHT_STATUS_ATTRIBUTE_ID, INSIGHT_VERIFY_SSL
 )
-try:
-    from config.local_settings_and_secrets import INSIGHT_FULL_NAME_ATTRIBUTE_ID, INSIGHT_FUNCTION_OBJECT_ATTRIBUTE_ID, INSIGHT_JIRA_INCIDENT_TYPE_ATTRIBUTE_ID
-except ImportError:
-    INSIGHT_FULL_NAME_ATTRIBUTE_ID = 63
-    INSIGHT_FUNCTION_OBJECT_ATTRIBUTE_ID = 2066
-    INSIGHT_JIRA_INCIDENT_TYPE_ATTRIBUTE_ID = 2413
 
 
 def MaskSensitiveText(text):
-    try:
-        safe_text = str(text)
-        if INSIGHT_AUTH_TOKEN:
-            safe_text = safe_text.replace(INSIGHT_AUTH_TOKEN, "***")
-        safe_text = re.sub(r"\bBearer\s+[^\s,;]+", "Bearer ***", safe_text)
-        safe_text = re.sub(r"\bBasic\s+[^\s,;]+", "Basic ***", safe_text)
-        return safe_text
-    except Exception:
-        return "Insight error details were hidden"
+    return CommonMaskSensitiveText(text)
 
 
 def MakeResult(success, is_activ, recipients, error_message, full_name="", function_object_key="", jira_incident_type_key=""):
