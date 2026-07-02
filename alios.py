@@ -68,24 +68,24 @@ ACTION_STEP_TEMPLATES = {
     "sendLowSeverityRootMessage": {
         "stepName": "sendLowSeverityRootMessage", "moduleName": "KTalkMessage", "stepSate": 0,
         "errorMessage": "", "retryNumber": 0, "messageAttributes": "",
-        "messageID": "", "messageDeliveryTime": "", "notificationErrors": []
+        "messageID": "", "messageDeliveryTime": "", "sended": 0, "notificationErrors": []
     },
     "sendCriticalRootMessage": {
         "stepName": "sendCriticalRootMessage", "moduleName": "KTalkMessage", "stepSate": 0,
         "errorMessage": "", "retryNumber": 0, "messageAttributes": "",
-        "messageID": "", "messageDeliveryTime": "", "notificationErrors": []
+        "messageID": "", "messageDeliveryTime": "", "sended": 0, "notificationErrors": []
     },
     "sendLowSeverityAggregateMessage": {
         "stepName": "sendLowSeverityAggregateMessage", "moduleName": "KTalkMessage", "stepSate": 1,
         "errorMessage": "", "retryNumber": 0, "targetEventBalance": 1, "deliveredEventBalance": 1,
         "repeatNumber": 0, "repeatLimit": KTALK_AGGREGATE_MESSAGE_REPEAT_COUNT, "successfulDeliveryNumber": 0,
-        "messageAttributes": "", "lastMessageID": "", "lastMessageDeliveryTime": "", "nextDeliveryTime": ""
+        "messageAttributes": "", "lastMessageID": "", "lastMessageDeliveryTime": "", "nextDeliveryTime": "", "sended": 0
     },
     "sendCriticalAggregateMessage": {
         "stepName": "sendCriticalAggregateMessage", "moduleName": "KTalkMessage", "stepSate": 1,
         "errorMessage": "", "retryNumber": 0, "targetEventBalance": 1, "deliveredEventBalance": 1,
         "repeatNumber": 0, "repeatLimit": KTALK_AGGREGATE_MESSAGE_REPEAT_COUNT, "successfulDeliveryNumber": 0,
-        "messageAttributes": "", "lastMessageID": "", "lastMessageDeliveryTime": "", "nextDeliveryTime": ""
+        "messageAttributes": "", "lastMessageID": "", "lastMessageDeliveryTime": "", "nextDeliveryTime": "", "sended": 0
     }
 }
 ACTION_TEMPLATE_INC = ACTION_STEP_TEMPLATES
@@ -303,6 +303,8 @@ def ValidateStepSpecificFields(step_data, root_key):
     elif step_name in ("sendLowSeverityRootMessage", "sendCriticalRootMessage"):
         for field in ("messageAttributes", "messageID", "messageDeliveryTime"):
             RequireType(step_data, field, str, root_key, step_name)
+        if int(step_data.get("sended", 0)) not in (0, 1):
+            raise ValueError("Invalid sended for step {} root key {}".format(step_name, root_key))
         RequireType(step_data, "notificationErrors", list, root_key, step_name)
     elif step_name in ("sendLowSeverityAggregateMessage", "sendCriticalAggregateMessage"):
         for field in ("targetEventBalance", "deliveredEventBalance", "repeatNumber", "repeatLimit", "successfulDeliveryNumber"):
@@ -310,6 +312,8 @@ def ValidateStepSpecificFields(step_data, root_key):
                 raise ValueError("Invalid {} for step {} root key {}".format(field, step_name, root_key))
         for field in ("messageAttributes", "lastMessageID", "lastMessageDeliveryTime", "nextDeliveryTime"):
             RequireType(step_data, field, str, root_key, step_name)
+        if int(step_data.get("sended", 0)) not in (0, 1):
+            raise ValueError("Invalid sended for step {} root key {}".format(step_name, root_key))
     elif step_name in ("createLowSeverityJiraIncident", "createCriticalJiraIncident"):
         for field in ("jiraKey", "jiraUrl"):
             RequireType(step_data, field, str, root_key, step_name)
@@ -975,6 +979,7 @@ def ResetAggregateStepForBalanceIfNeeded(alert_data):
     aggregate_step["lastMessageID"] = ""
     aggregate_step["lastMessageDeliveryTime"] = ""
     aggregate_step["nextDeliveryTime"] = ""
+    aggregate_step["sended"] = 0
     return True
 
 

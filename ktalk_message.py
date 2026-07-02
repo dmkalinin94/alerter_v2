@@ -204,17 +204,17 @@ def GetRecipients(alert_data):
 def SendRoot(root_key, alert_data, step_data):
     new_step = step_data.copy(); new_step.setdefault("notificationErrors", [])
     if new_step.get("messageID"):
-        new_step.update({"stepSate": 1, "errorMessage": ""}); return True, new_step
+        new_step.update({"stepSate": 1, "errorMessage": "", "sended": 1}); return True, new_step
     if requests is None:
-        new_step.update({"stepSate": 2, "errorMessage": "requests module is not available"}); return False, new_step
+        new_step.update({"stepSate": 2, "errorMessage": "requests module is not available", "sended": 0}); return False, new_step
     if not new_step.get("sendTime"):
         new_step["sendTime"] = NowString()
     attrs = BuildMessageAttributes(root_key, new_step, "root"); new_step["messageAttributes"] = attrs
     body = BuildRootMessage(root_key, alert_data, new_step)
     event_id, error = SendMessageAndGetId(KTALK_ROOM_ID, body, attrs)
     if not event_id:
-        new_step.update({"stepSate": 2, "errorMessage": error}); return False, new_step
-    new_step.update({"stepSate": 1, "errorMessage": "", "messageID": event_id, "messageDeliveryTime": NowString()})
+        new_step.update({"stepSate": 2, "errorMessage": error, "sended": 0}); return False, new_step
+    new_step.update({"stepSate": 1, "errorMessage": "", "messageID": event_id, "messageDeliveryTime": NowString(), "sended": 1})
     errors = InviteAllUsers(GetRecipients(alert_data)) + MentionAllUsers(event_id, GetRecipients(alert_data))
     if errors:
         new_step["notificationErrors"] = errors
@@ -252,9 +252,9 @@ def SendAggregate(root_key, alert_data, step_data):
     repeat_number += 1; new_step["repeatNumber"] = repeat_number
     if event_id:
         new_step["successfulDeliveryNumber"] = int(new_step.get("successfulDeliveryNumber", 0)) + 1
-        new_step["lastMessageID"] = event_id; new_step["lastMessageDeliveryTime"] = NowString(); new_step["errorMessage"] = ""
+        new_step["lastMessageID"] = event_id; new_step["lastMessageDeliveryTime"] = NowString(); new_step["errorMessage"] = ""; new_step["sended"] = 1
     else:
-        new_step["retryNumber"] = int(new_step.get("retryNumber", 0)) + 1; new_step["errorMessage"] = error
+        new_step["retryNumber"] = int(new_step.get("retryNumber", 0)) + 1; new_step["errorMessage"] = error; new_step["sended"] = 0
     if repeat_number >= repeat_limit:
         new_step.update({"stepSate": 1, "deliveredEventBalance": int(new_step.get("targetEventBalance", 0)), "nextDeliveryTime": "", "messageAttributes": ""})
     else:
