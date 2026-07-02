@@ -3,21 +3,28 @@
 
 import datetime
 import hashlib
+import html
 import re
 import time
 import uuid
+from urllib.parse import quote
 try:
     import requests
 except ImportError:
     requests = None
 
+from config.secret_masking import MaskSensitiveText as CommonMaskSensitiveText
 from config.local_settings_and_secrets import (
-    KTALK_AGGREGATE_MESSAGE_REPEAT_COUNT,
+    JIRA_THREAD_LINK_CUSTOM_FIELD, JIRA_THREAD_LINK_TRANSITION_ENABLED,
+    JIRA_THREAD_LINK_TRANSITION_ID, JIRA_THREAD_LINK_TRANSITION_STRICT,
+    JIRA_THREAD_LINK_TRANSITION_URL, JIRA_TOKEN, KTALK_AGGREGATE_MESSAGE_REPEAT_COUNT,
     KTALK_AGGREGATE_MESSAGE_REPEAT_INTERVAL_SECONDS, KTALK_BASE_URL,
-    KTALK_BEARER_TOKEN, KTALK_MESSAGE_SEARCH_ATTEMPTS,
-    KTALK_MESSAGE_SEARCH_DELAY_SECONDS, KTALK_MESSAGE_SEARCH_LIMIT,
-    KTALK_REQUEST_TIMEOUT_SECONDS, KTALK_ROOM_ID, KTALK_TALK_HOST,
-    KTALK_TALK_TOKEN, KTALK_VERIFY_SSL
+    KTALK_BEARER_TOKEN, KTALK_BOT_USER, KTALK_HOST, KTALK_JWT_TOKEN,
+    KTALK_MESSAGE_SEARCH_ATTEMPTS, KTALK_MESSAGE_SEARCH_DELAY_SECONDS,
+    KTALK_MESSAGE_SEARCH_LIMIT, KTALK_RETRY_DELAY_SECONDS, KTALK_ROOM_ID,
+    KTALK_SAFE_REQUEST_RETRIES, KTALK_SAFE_REQUEST_TIMEOUT, KTALK_SEND_MESSAGE_RETRIES,
+    KTALK_SEND_MESSAGE_TIMEOUT, KTALK_TALK_HOST, KTALK_THREAD_LINK_REQUIRED_PREFIX,
+    KTALK_THREAD_WEB_URL_TEMPLATE, KTALK_VERIFY_SSL
 )
 
 DATETIME_FORMAT = "%Y.%m.%d %H:%M:%S"
@@ -29,12 +36,7 @@ def NowString():
 
 
 def MaskSensitiveText(text):
-    safe = str(text)
-    for secret in (globals().get("KTALK_BEARER_TOKEN", ""), globals().get("KTALK_TALK_TOKEN", "")):
-        if secret:
-            safe = safe.replace(secret, "***")
-    safe = re.sub(r"\bBearer\s+[^\s,;]+", "Bearer ***", safe)
-    return safe[:2000]
+    return CommonMaskSensitiveText(text)
 
 
 def FindStep(alert_data, names):
@@ -91,13 +93,55 @@ def KTalkHeaders():
     bearer_token = str(KTALK_BEARER_TOKEN).strip()
     if not bearer_token.lower().startswith("bearer "):
         bearer_token = "Bearer {}".format(bearer_token)
-    return {"Authorization": bearer_token, "Content-Type": "application/json"}
+    return {"authorization": bearer_token, "content-type": "application/json", "host": KTALK_HOST, "origin": KTALK_TALK_HOST, "talk-host": KTALK_TALK_HOST, "accept": "application/json"}
+
+
+def BotApiUrl():
+    return "{}/_matrix/client/strangler/api/v1/bot/{}/send_message".format(KTALK_BASE_URL.rstrip("/"), KTALK_JWT_TOKEN)
+
+
+def SendBotMessage(body, root_event_id=None):
+    payload = {"room_id": KTALK_ROOM_ID, "thread_id": root_event_id, "format": "plain", "message": body, "mentions": []}
+    headers = {"x-bot-user": KTALK_BOT_USER}
+    attempts = max(1, int(KTALK_SEND_MESSAGE_RETRIES))
+    for attempt in range(attempts):
+        try:
+            response = requests.post(BotApiUrl(), headers=headers, json=payload, timeout=KTALK_SEND_MESSAGE_TIMEOUT, verify=KTALK_VERIFY_SSL)
+            if 500 <= response.status_code <= 599:
+                return "", "ambiguous HTTP {} from KTalk Bot API".format(response.status_code)
+            if response.status_code in (408, 429) and attempt + 1 < attempts:
+                time.sleep(float(KTALK_RETRY_DELAY_SECONDS))
+                continue
+            response.raise_for_status()
+            data = response.json()
+            event_id = data.get("event_id") or data.get("messageID") or data.get("message_id")
+            if not event_id:
+                return "", "ambiguous KTalk Bot API response without event_id"
+            return event_id, ""
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as error:
+            return "", "ambiguous {}: {}".format(type(error).__name__, error)
+        except Exception as error:
+            return "", "{}: {}".format(type(error).__name__, error)
+    return "", "message was not confirmed"
+
+
+def SafeRequest(method, url, **kwargs):
+    attempts = max(1, int(KTALK_SAFE_REQUEST_RETRIES))
+    kwargs.setdefault("timeout", KTALK_SAFE_REQUEST_TIMEOUT)
+    kwargs.setdefault("verify", KTALK_VERIFY_SSL)
+    for attempt in range(attempts):
+        try:
+            return requests.request(method, url, **kwargs)
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+            if attempt + 1 >= attempts:
+                raise
+            time.sleep(float(KTALK_RETRY_DELAY_SECONDS))
 
 
 def SendMatrixMessage(room_id, message_attributes, payload):
     txn_id = BuildTransactionId(message_attributes)
     url = "{}/_matrix/client/r0/rooms/{}/send/m.room.message/{}".format(KTALK_BASE_URL.rstrip("/"), room_id, txn_id)
-    response = requests.put(url, headers=KTalkHeaders(), json=payload, timeout=KTALK_REQUEST_TIMEOUT_SECONDS, verify=KTALK_VERIFY_SSL)
+    response = SafeRequest("put", url, headers=KTalkHeaders(), json=payload)
     if response.status_code == 200:
         data = response.json()
         return data.get("event_id"), ""
@@ -127,7 +171,7 @@ def FindMessageByAttributes(room_id, message_attributes, body=""):
     base = KTALK_BASE_URL.rstrip("/")
     urls = ["{}/_matrix/client/r0/rooms/{}/messages?dir=b&limit={}".format(base, room_id, KTALK_MESSAGE_SEARCH_LIMIT), "{}/_matrix/client/r0/sync?timeout=0".format(base)]
     for url in urls:
-        response = requests.get(url, headers=KTalkHeaders(), timeout=KTALK_REQUEST_TIMEOUT_SECONDS, verify=KTALK_VERIFY_SSL)
+        response = SafeRequest("get", url, headers=KTalkHeaders())
         if response.status_code != 200:
             continue
         for event in EventsFromMessagesData(response.json()):
@@ -140,8 +184,7 @@ def SendMessageAndGetId(room_id, body, message_attributes, root_event_id=None):
     found = FindMessageByAttributes(room_id, message_attributes, body)
     if found:
         return found, ""
-    payload = BuildMessageAttributesPayload(body, message_attributes, root_event_id)
-    event_id, error = SendMatrixMessage(room_id, message_attributes, payload)
+    event_id, error = SendBotMessage(body, root_event_id)
     if event_id:
         return event_id, ""
     for _ in range(max(1, int(KTALK_MESSAGE_SEARCH_ATTEMPTS))):
@@ -160,7 +203,7 @@ def SendThreadReply(root_message_id, body, message_attributes=""):
 
 
 def InviteUser(user):
-    response = requests.post("{}/_matrix/client/v3/rooms/{}/invite".format(KTALK_BASE_URL.rstrip("/"), KTALK_ROOM_ID), headers=KTalkHeaders(), json={"user_id": user.get("mentionId", "")}, timeout=KTALK_REQUEST_TIMEOUT_SECONDS, verify=KTALK_VERIFY_SSL)
+    response = SafeRequest("post", "{}/_matrix/client/v3/rooms/{}/invite".format(KTALK_BASE_URL.rstrip("/"), KTALK_ROOM_ID), headers=KTalkHeaders(), json={"user_id": user.get("mentionId", "")})
     if response.status_code in (200, 403):
         return ""
     return "HTTP {}".format(response.status_code)
@@ -178,8 +221,11 @@ def InviteAllUsers(recipients):
 def MentionUser(root_message_id, user):
     display = user.get("displayName") or user.get("adLogin") or user.get("mentionId")
     mention_id = user.get("mentionId", "")
-    user_url = "{}/user/{}".format(KTALK_TALK_HOST.rstrip("/"), mention_id)
-    payload = BuildMessageAttributesPayload(display + " ", "alerter_v2|mention|{}|{}".format(root_message_id, mention_id), root_message_id, {"user_ids": [mention_id]}, '<a href="{}">{}</a>'.format(user_url, display))
+    encoded_mention_id = quote(mention_id, safe="@:$")
+    user_url = "{}/app/messenger/#/user/{}".format(KTALK_TALK_HOST.rstrip("/"), encoded_mention_id)
+    escaped_display = html.escape(display, quote=True)
+    escaped_user_url = html.escape(user_url, quote=True)
+    payload = BuildMessageAttributesPayload(display + " ", "alerter_v2|mention|{}|{}".format(root_message_id, mention_id), root_message_id, {"user_ids": [mention_id]}, '<a href="{}">{}</a>'.format(escaped_user_url, escaped_display))
     event_id, error = SendMatrixMessage(KTALK_ROOM_ID, payload[ATTR_KEY], payload)
     return "" if event_id else error
 
@@ -208,6 +254,28 @@ def GetRecipients(alert_data):
     return FindStep(alert_data, "resolveKTalkUsers").get("recipientList", [])
 
 
+
+def BuildKTalkThreadLink(room_id, thread_root_event_id):
+    thread_link = KTALK_THREAD_WEB_URL_TEMPLATE.format(room_id=quote(room_id, safe=""), thread_root_event_id=quote(thread_root_event_id, safe=""))
+    if not thread_link.startswith(KTALK_THREAD_LINK_REQUIRED_PREFIX):
+        raise ValueError("KTalk thread link does not have required prefix")
+    return thread_link
+
+
+def AttachKTalkThreadLinkToJira(alert_data, thread_root_event_id):
+    if not JIRA_THREAD_LINK_TRANSITION_ENABLED:
+        return ""
+    jira_step = FindStep(alert_data, ("createLowSeverityJiraIncident", "createCriticalJiraIncident"))
+    jira_key = jira_step.get("jiraKey", "")
+    if not jira_key:
+        return "Jira thread-link transition skipped: jiraKey is empty"
+    thread_link = BuildKTalkThreadLink(KTALK_ROOM_ID, thread_root_event_id)
+    payload = {"transition": {"id": JIRA_THREAD_LINK_TRANSITION_ID}, "fields": {JIRA_THREAD_LINK_CUSTOM_FIELD: thread_link}}
+    response = requests.post(JIRA_THREAD_LINK_TRANSITION_URL.format(jira_key), headers={"Authorization": JIRA_TOKEN, "Accept": "application/json", "Content-Type": "application/json"}, json=payload, timeout=KTALK_SAFE_REQUEST_TIMEOUT, verify=KTALK_VERIFY_SSL)
+    if response.status_code == 204:
+        return ""
+    return "Jira thread-link transition failed: HTTP {} {}".format(response.status_code, response.text[:500])
+
 def SendRoot(root_key, alert_data, step_data):
     new_step = step_data.copy(); new_step.setdefault("notificationErrors", [])
     if new_step.get("messageID"):
@@ -221,6 +289,11 @@ def SendRoot(root_key, alert_data, step_data):
     event_id, error = SendMessageAndGetId(KTALK_ROOM_ID, body, attrs)
     if not event_id:
         new_step.update({"stepSate": 2, "errorMessage": error, "sended": 0}); return False, new_step
+    transition_error = AttachKTalkThreadLinkToJira(alert_data, event_id)
+    if transition_error and JIRA_THREAD_LINK_TRANSITION_STRICT:
+        new_step.update({"stepSate": 2, "errorMessage": MaskSensitiveText(transition_error), "sended": 0}); return False, new_step
+    if transition_error:
+        new_step["threadLinkTransitionError"] = MaskSensitiveText(transition_error)
     new_step.update({"stepSate": 1, "errorMessage": "", "messageID": event_id, "messageDeliveryTime": NowString(), "sended": 1})
     errors = InviteAllUsers(GetRecipients(alert_data)) + MentionAllUsers(event_id, GetRecipients(alert_data))
     if errors:

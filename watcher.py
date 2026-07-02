@@ -8,10 +8,7 @@ import os
 import subprocess
 import sys
 
-try:
-    from config.local_settings_and_secrets import CLI_COMMAND_TIMEOUT_SECONDS
-except ImportError:
-    CLI_COMMAND_TIMEOUT_SECONDS = 10
+from config.local_settings_and_secrets import CLI_COMMAND_TIMEOUT_SECONDS
 
 
 ############################### VARS ###############################

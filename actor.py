@@ -19,21 +19,13 @@ import mktapi
 import jira_inc
 import ktalk_message
 
-try:
-    from config.local_settings_and_secrets import (
-        ACTOR_LOCK_FILE, ACTOR_LOCK_RETRY_INTERVAL_SECONDS, ACTOR_LOCK_TIMEOUT_SECONDS,
-        ACTOR_MAX_RUNTIME_SECONDS, CLI_COMMAND_TIMEOUT_SECONDS, LOG_KEEP_SIZE_BYTES,
-        LOG_MAX_SIZE_BYTES, WATCHER_COMMAND_TIMEOUT_SECONDS
-    )
-except ImportError:
-    ACTOR_LOCK_FILE = "/tmp/alerter_actor.lock"
-    ACTOR_LOCK_TIMEOUT_SECONDS = 10
-    ACTOR_LOCK_RETRY_INTERVAL_SECONDS = 0.2
-    ACTOR_MAX_RUNTIME_SECONDS = 30
-    CLI_COMMAND_TIMEOUT_SECONDS = 10
-    WATCHER_COMMAND_TIMEOUT_SECONDS = 20
-    LOG_MAX_SIZE_BYTES = 104857600
-    LOG_KEEP_SIZE_BYTES = 83886080
+from config.config_check import ValidateConfig
+from config.secret_masking import MaskSensitiveText
+from config.local_settings_and_secrets import (
+    ACTOR_LOCK_FILE, ACTOR_LOCK_RETRY_INTERVAL_SECONDS, ACTOR_LOCK_TIMEOUT_SECONDS,
+    ACTOR_MAX_RUNTIME_SECONDS, CLI_COMMAND_TIMEOUT_SECONDS, LOG_KEEP_SIZE_BYTES,
+    LOG_MAX_SIZE_BYTES, WATCHER_COMMAND_TIMEOUT_SECONDS
+)
 
 
 CLI_PATH_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alios.py")
@@ -77,7 +69,7 @@ def TrimLogFileIfNeeded(log_file):
 
 def WriteLog(message, level, component="actor"):
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_message = "{} [{}] {}: {}".format(now, level, component, message)
+    log_message = "{} [{}] {}: {}".format(now, level, component, MaskSensitiveText(message))
     try:
         TrimLogFileIfNeeded(LOG_FILE)
         file = open(LOG_FILE, "a", encoding="utf-8")
@@ -412,6 +404,11 @@ def Main():
     signal.alarm(ACTOR_MAX_RUNTIME_SECONDS)
     try:
         WriteLog("Actor started", "INFO")
+        try:
+            ValidateConfig()
+        except RuntimeError as error:
+            WriteLog(str(error), "ERROR")
+            sys.exit(1)
         WriteLog("CLI path: {}".format(args.cli_path), "INFO")
         WriteLog("Watcher path: {}".format(args.watcher_path), "INFO")
         WriteLog("State file path: {}".format(args.state_file), "INFO")
