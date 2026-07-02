@@ -33,6 +33,12 @@ def FindStep(alert_data, step_name):
     return {}
 
 
+def BuildJiraBrowseUrl(jira_key):
+    if "{}" in JIRA_ISSUE_BROWSE_URL:
+        return JIRA_ISSUE_BROWSE_URL.format(jira_key)
+    return JIRA_ISSUE_BROWSE_URL.rstrip("/") + "/" + jira_key
+
+
 def CreateLowSeverityJiraIncident(root_key, alert_data, step_data):
     return CreateJiraIncident(root_key, alert_data, step_data)
 
@@ -67,7 +73,7 @@ def CreateJiraIncident(root_key, alert_data, step_data):
         jira_key = data.get("key")
         if not jira_key:
             raise ValueError("Jira response does not contain issue key")
-        new_step.update({"stepSate": 1, "errorMessage": "", "jiraKey": jira_key, "jiraUrl": JIRA_ISSUE_BROWSE_URL.rstrip("/") + "/" + jira_key})
+        new_step.update({"stepSate": 1, "errorMessage": "", "jiraKey": jira_key, "jiraUrl": BuildJiraBrowseUrl(jira_key)})
         return True, new_step
     except Exception as error:
         new_step.update({"stepSate": 2, "errorMessage": MaskSensitiveText("{}: {}".format(type(error).__name__, error))})

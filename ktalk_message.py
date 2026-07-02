@@ -88,7 +88,10 @@ def BuildAggregateMessage(root_key, alert_data, step_data):
 
 
 def KTalkHeaders():
-    return {"Authorization": "Bearer {}".format(KTALK_BEARER_TOKEN), "Content-Type": "application/json"}
+    bearer_token = str(KTALK_BEARER_TOKEN).strip()
+    if not bearer_token.lower().startswith("bearer "):
+        bearer_token = "Bearer {}".format(bearer_token)
+    return {"Authorization": bearer_token, "Content-Type": "application/json"}
 
 
 def SendMatrixMessage(room_id, message_attributes, payload):
