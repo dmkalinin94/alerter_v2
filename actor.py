@@ -15,6 +15,9 @@ import sys
 import alios
 import db
 import insight
+import ktalk_users
+import jira_inc
+import ktalk_message
 
 try:
     from config.local_settings_and_secrets import (
@@ -204,7 +207,7 @@ def GetRetryNumber(action_data):
     except (TypeError, ValueError):
         return 0
 
-def HandleInsightID(root_key, alert_data, action_data):
+def HandleResolveInsightId(root_key, alert_data, action_data):
     retry_number = action_data.get("retryNumber", 0)
     try:
         retry_number = int(retry_number)
@@ -219,27 +222,21 @@ def HandleInsightID(root_key, alert_data, action_data):
     ), "INFO", "db")
 
     if result.get("success") is True:
-        return True, {
-            "stepSate": 1,
-            "errorMessage": "",
-            "retryNumber": retry_number,
-            "insightId": result.get("insightId", "")
-        }
+        new_data = action_data.copy()
+        new_data.update({"stepSate": 1, "errorMessage": "", "retryNumber": retry_number, "insightId": result.get("insightId", "")})
+        return True, new_data
 
-    return False, {
-        "stepSate": 2,
-        "errorMessage": result.get("errorMessage", "Unknown InsightID error"),
-        "retryNumber": retry_number + 1,
-        "insightId": ""
-    }
+    new_data = action_data.copy()
+    new_data.update({"stepSate": 2, "errorMessage": result.get("errorMessage", "Unknown InsightID error"), "retryNumber": retry_number + 1, "insightId": ""})
+    return False, new_data
 
 
-def HandleInsightData(root_key, alert_data, action_data):
+def HandleLoadInsightData(root_key, alert_data, action_data):
     retry_number = GetRetryNumber(action_data)
     WriteLog("InsightData started for root key {}".format(root_key), "INFO")
     try:
-        insight_id_data = alert_data["action"]["InsightID"]
-        if insight_id_data.get("stepSate") != 1:
+        _, insight_id_data = alios.FindStepByName(alert_data["action"], "resolveInsightId")
+        if not isinstance(insight_id_data, dict) or insight_id_data.get("stepSate") != 1:
             raise ValueError("InsightID action is not completed")
         insight_id = insight_id_data.get("insightId")
         if not isinstance(insight_id, str) or insight_id.strip() == "":
@@ -248,104 +245,105 @@ def HandleInsightData(root_key, alert_data, action_data):
     except Exception as error:
         error_message = str(error)[:2000]
         WriteLog("InsightData structure error for root key {}: {}".format(root_key, error_message), "ERROR")
-        return False, {"stepSate": 2, "errorMessage": error_message, "retryNumber": retry_number + 1, "isActiv": 0, "recipientADUserList": []}
+        new_data = action_data.copy(); new_data.update({"stepSate": 2, "errorMessage": error_message, "retryNumber": retry_number + 1, "isActiv": 0, "recipientADUserList": []}); return False, new_data
 
     WriteLog("InsightData uses insight_id {} for root key {}".format(insight_id, root_key), "INFO")
     result = insight.GetInsightData(insight_id, lambda message, level: WriteLog(message, level, "insight"))
     error_message = insight.MaskSensitiveText(result.get("errorMessage", ""))[:2000]
     if result.get("success") is True:
         WriteLog("InsightData completed for root key {} isActiv={} recipients={}".format(root_key, result.get("isActiv", 0), len(result.get("recipientADUserList", []))), "INFO")
-        return True, {"stepSate": 1, "errorMessage": "", "retryNumber": retry_number, "isActiv": int(result.get("isActiv", 0)), "recipientADUserList": result.get("recipientADUserList", [])}
+        new_data = action_data.copy(); new_data.update({"stepSate": 1, "errorMessage": "", "retryNumber": retry_number, "isActiv": int(result.get("isActiv", 0)), "fullName": result.get("fullName", ""), "functionObjectKey": result.get("functionObjectKey", ""), "jiraIncidentTypeKey": result.get("jiraIncidentTypeKey", ""), "recipientADUserList": result.get("recipientADUserList", [])}); return True, new_data
 
     WriteLog("InsightData error for root key {}: {}".format(root_key, error_message), "ERROR")
-    return False, {"stepSate": 2, "errorMessage": error_message, "retryNumber": retry_number + 1, "isActiv": 0, "recipientADUserList": []}
+    new_data = action_data.copy(); new_data.update({"stepSate": 2, "errorMessage": error_message, "retryNumber": retry_number + 1, "isActiv": 0, "recipientADUserList": []}); return False, new_data
 
 
 def GetActionOrder(alert_data):
-    return alios.GetRequiredActionKeys(alert_data)
+    return alios.GetOrderedStepKeys(alert_data.get("action", {}))
+
+
+def IsMandatoryStep(step_name):
+    return step_name in ("resolveInsightId", "loadInsightData", "resolveKTalkUsers", "createLowSeverityJiraIncident", "createCriticalJiraIncident", "sendLowSeverityRootMessage", "sendCriticalRootMessage")
 
 
 def ProcessPackage(args, root_key, alert_data, counters, handlers):
     counters["processed"] = counters["processed"] + 1
     WriteLog("Processing root key: {}".format(root_key), "INFO")
-
     if not isinstance(alert_data, dict):
+        counters["structure_errors"] += 1
         WriteLog("Alert data is not a dictionary for root key {}".format(root_key), "ERROR")
-        counters["structure_errors"] = counters["structure_errors"] + 1
         return
-
     action_dictionary = alert_data.get("action")
     if not isinstance(action_dictionary, dict):
+        counters["structure_errors"] += 1
         WriteLog("Action value is not a dictionary for root key {}".format(root_key), "ERROR")
-        counters["structure_errors"] = counters["structure_errors"] + 1
         return
-
     try:
-        action_order = GetActionOrder(alert_data)
+        step_order = GetActionOrder(alert_data)
     except ValueError as error:
+        counters["structure_errors"] += 1
         WriteLog("Action order error for root key {}: {}".format(root_key, error), "ERROR")
-        counters["structure_errors"] = counters["structure_errors"] + 1
         return
-
-    previous_actions_successful = True
-    for action_name in action_order:
-        WriteLog("Current action for root key {}: {}".format(root_key, action_name), "INFO")
-        if not previous_actions_successful:
-            WriteLog("Previous action is not successful, skipping {} for root key {}".format(action_name, root_key), "ERROR")
+    for step_number in step_order:
+        step_data = action_dictionary[step_number]
+        if not isinstance(step_data, dict):
+            counters["structure_errors"] += 1
+            WriteLog("Action step {} is not a dictionary for root key {}".format(step_number, root_key), "ERROR")
             return
-        if action_name not in action_dictionary:
-            WriteLog("Action {} is missing for root key {}".format(action_name, root_key), "ERROR")
-            counters["structure_errors"] = counters["structure_errors"] + 1
-            return
-        if action_name not in handlers:
-            WriteLog("Handler is missing for action {} root key {}".format(action_name, root_key), "ERROR")
-            counters["structure_errors"] = counters["structure_errors"] + 1
-            return
-
-        action_data = action_dictionary[action_name]
-        if not isinstance(action_data, dict):
-            WriteLog("Action {} is not a dictionary for root key {}".format(action_name, root_key), "ERROR")
-            counters["structure_errors"] = counters["structure_errors"] + 1
-            return
-
-        step_state = action_data.get("stepSate")
-        if step_state == 1:
-            counters["skipped_done"] = counters["skipped_done"] + 1
-            WriteLog("Action {} already completed for root key {}, skipped".format(action_name, root_key), "INFO")
+        step_name = step_data.get("stepName")
+        module_name = step_data.get("moduleName")
+        WriteLog("Current step for root key {}: #{} {}.{}".format(root_key, step_number, module_name, step_name), "INFO")
+        if step_data.get("stepSate") == 1:
+            counters["skipped_done"] += 1
             continue
-        if step_state not in (0, 2):
-            WriteLog("Invalid stepSate for action {} root key {}: {}".format(action_name, root_key, step_state), "ERROR")
-            counters["structure_errors"] = counters["structure_errors"] + 1
+        handler = handlers.get((module_name, step_name))
+        if handler is None:
+            counters["structure_errors"] += 1
+            WriteLog("Handler is missing for step {}.{} root key {}".format(module_name, step_name, root_key), "ERROR")
             return
-
+        step_data["stepNumber"] = step_number
         try:
-            success, new_action_data = handlers[action_name](root_key, alert_data, action_data)
+            success, new_step_data = handler(root_key, alert_data, step_data)
         except Exception as error:
-            WriteLog("Action {} raised exception for root key {}: {}".format(action_name, root_key, error), "ERROR")
+            WriteLog("Step #{} {} raised exception for root key {}: {}".format(step_number, step_name, root_key, error), "ERROR")
             WriteLog(traceback.format_exc(), "ERROR")
-            retry_number = GetRetryNumber(action_data)
-            new_action_data = action_data.copy()
-            new_action_data["stepSate"] = 2
-            new_action_data["retryNumber"] = retry_number + 1
-            new_action_data["errorMessage"] = ("{}: {}".format(type(error).__name__, str(error)))[:2000]
+            retry_number = GetRetryNumber(step_data)
+            new_step_data = step_data.copy()
+            new_step_data["retryNumber"] = retry_number + 1
+            new_step_data["errorMessage"] = ("{}: {}".format(type(error).__name__, str(error)))[:2000]
+            new_step_data["stepSate"] = 2 if IsMandatoryStep(step_name) else 0
             success = False
-        if not UpdateAction(args, root_key, action_name, new_action_data):
-            counters["cli_write_errors"] = counters["cli_write_errors"] + 1
+        new_step_data.pop("stepNumber", None)
+        if not success and not IsMandatoryStep(step_name):
+            new_step_data["stepSate"] = 0 if int(new_step_data.get("repeatNumber", 0)) < int(new_step_data.get("repeatLimit", 1)) else 1
+        if not UpdateAction(args, root_key, step_number, new_step_data):
+            counters["cli_write_errors"] += 1
             return
-
+        action_dictionary[step_number] = new_step_data
         if success:
-            counters["actions_success"] = counters["actions_success"] + 1
-            action_dictionary[action_name] = new_action_data
-            previous_actions_successful = True
-        else:
-            counters["actions_error"] = counters["actions_error"] + 1
-            action_dictionary[action_name] = new_action_data
-            WriteLog("Action {} failed for root key {}".format(action_name, root_key), "ERROR")
+            counters["actions_success"] += 1
+            if new_step_data.get("stepSate") == 0:
+                WriteLog("Step #{} {} waits for continuation".format(step_number, step_name), "INFO")
+            continue
+        counters["actions_error"] += 1
+        WriteLog("Step #{} {} failed for root key {}".format(step_number, step_name, root_key), "ERROR")
+        if IsMandatoryStep(step_name):
             return
 
+STEP_HANDLERS = {
+    ("InsightID", "resolveInsightId"): HandleResolveInsightId,
+    ("InsightData", "loadInsightData"): HandleLoadInsightData,
+    ("KTalkUsers", "resolveKTalkUsers"): ktalk_users.ResolveKTalkUsers,
+    ("JiraINC", "createLowSeverityJiraIncident"): jira_inc.CreateLowSeverityJiraIncident,
+    ("JiraINC", "createCriticalJiraIncident"): jira_inc.CreateCriticalJiraIncident,
+    ("KTalkMessage", "sendLowSeverityRootMessage"): ktalk_message.SendLowSeverityRootMessage,
+    ("KTalkMessage", "sendCriticalRootMessage"): ktalk_message.SendCriticalRootMessage,
+    ("KTalkMessage", "sendLowSeverityAggregateMessage"): ktalk_message.SendLowSeverityAggregateMessage,
+    ("KTalkMessage", "sendCriticalAggregateMessage"): ktalk_message.SendCriticalAggregateMessage,
+}
 
 def ProcessAlertPackages(args, alert_dictionary_list):
-    handlers = {"InsightID": HandleInsightID, "InsightData": HandleInsightData}
+    handlers = STEP_HANDLERS
     counters = {
         "processed": 0,
         "actions_success": 0,
