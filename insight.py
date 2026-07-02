@@ -10,6 +10,12 @@ from config.local_settings_and_secrets import (
     INSIGHT_REQUEST_TIMEOUT_SECONDS, INSIGHT_RESPONSIBLE_GROUP_ATTRIBUTE_ID,
     INSIGHT_SERVICE_URL, INSIGHT_STATUS_ATTRIBUTE_ID, INSIGHT_VERIFY_SSL
 )
+try:
+    from config.local_settings_and_secrets import INSIGHT_FULL_NAME_ATTRIBUTE_ID, INSIGHT_FUNCTION_OBJECT_ATTRIBUTE_ID, INSIGHT_JIRA_INCIDENT_TYPE_ATTRIBUTE_ID
+except ImportError:
+    INSIGHT_FULL_NAME_ATTRIBUTE_ID = 0
+    INSIGHT_FUNCTION_OBJECT_ATTRIBUTE_ID = 0
+    INSIGHT_JIRA_INCIDENT_TYPE_ATTRIBUTE_ID = 0
 
 
 def MaskSensitiveText(text):
@@ -24,10 +30,13 @@ def MaskSensitiveText(text):
         return "Insight error details were hidden"
 
 
-def MakeResult(success, is_activ, recipients, error_message):
+def MakeResult(success, is_activ, recipients, error_message, full_name="", function_object_key="", jira_incident_type_key=""):
     return {
         "success": success,
         "isActiv": is_activ,
+        "fullName": full_name,
+        "functionObjectKey": function_object_key,
+        "jiraIncidentTypeKey": jira_incident_type_key,
         "recipientADUserList": recipients,
         "errorMessage": MaskSensitiveText(error_message)
     }
@@ -59,6 +68,22 @@ def GetJsonList(url, headers, verify, timeout):
         raise ValueError("Insight response root object is not a list")
     return response.status_code, data
 
+
+
+def ExtractFirstTextValue(attribute_list, attribute_id):
+    if not attribute_id:
+        return ""
+    attribute = GetAttributeById(attribute_list, attribute_id)
+    if not isinstance(attribute, dict):
+        return ""
+    values = attribute.get("objectAttributeValues")
+    if not isinstance(values, list) or not values:
+        return ""
+    value = values[0] if isinstance(values[0], dict) else {}
+    referenced = value.get("referencedObject") if isinstance(value, dict) else None
+    if isinstance(referenced, dict):
+        return str(referenced.get("objectKey", referenced.get("key", referenced.get("name", "")))).strip()
+    return str(value.get("value", "")).strip()
 
 def ExtractServiceStatus(attribute_list):
     status_attribute = GetAttributeById(attribute_list, INSIGHT_STATUS_ATTRIBUTE_ID)
@@ -149,6 +174,9 @@ def GetInsightData(insight_id, log_callback=None):
         WriteInsightLog(log_callback, "Insight service HTTP status: {}".format(service_status_code), "INFO")
 
         service_status, service_status_error = ExtractServiceStatus(service_attributes)
+        full_name = ExtractFirstTextValue(service_attributes, INSIGHT_FULL_NAME_ATTRIBUTE_ID) or str(insight_id)
+        function_object_key = ExtractFirstTextValue(service_attributes, INSIGHT_FUNCTION_OBJECT_ATTRIBUTE_ID)
+        jira_incident_type_key = ExtractFirstTextValue(service_attributes, INSIGHT_JIRA_INCIDENT_TYPE_ATTRIBUTE_ID)
         group_id, group_id_error = ExtractResponsibleGroupId(service_attributes)
 
         if service_status_error:
@@ -162,12 +190,12 @@ def GetInsightData(insight_id, log_callback=None):
             WriteInsightLog(log_callback, "Insight responsible group id: {}".format(group_id), "INFO")
 
         if service_status_error:
-            return MakeResult(False, 0, [], service_status_error)
+            return MakeResult(False, 0, [], service_status_error, full_name, "", "")
         if service_status != INSIGHT_ACTUAL_STATUS_VALUE:
             WriteInsightLog(log_callback, 'Service {} is not in status "{}"; responsible users loading skipped'.format(insight_id, INSIGHT_ACTUAL_STATUS_VALUE), "WARNING")
-            return MakeResult(True, 0, [], "")
+            return MakeResult(True, 0, [], "", full_name, "", "")
         if group_id_error:
-            return MakeResult(False, 0, [], group_id_error)
+            return MakeResult(False, 0, [], group_id_error, full_name, function_object_key, jira_incident_type_key)
 
         group_headers = {"Content-Type": "application/json", "Authorization": INSIGHT_AUTH_TOKEN}
         group_url = FormatUrlTemplate(INSIGHT_GROUP_URL, "group_id", group_id)
@@ -184,8 +212,8 @@ def GetInsightData(insight_id, log_callback=None):
         WriteInsightLog(log_callback, "Mandatory recipient users added: {}".format(mandatory_count), "INFO")
         if len(recipients) == 0:
             WriteInsightLog(log_callback, "Insight recipient list is empty", "ERROR")
-            return MakeResult(False, 0, [], "Insight recipient list is empty")
-        return MakeResult(True, 1, recipients, "")
+            return MakeResult(False, 0, [], "Insight recipient list is empty", full_name, function_object_key, jira_incident_type_key)
+        return MakeResult(True, 1, recipients, "", full_name, function_object_key, jira_incident_type_key)
     except Exception as error:
         error_message = "{}: {}".format(type(error).__name__, MaskSensitiveText(error))
         WriteInsightLog(log_callback, "Insight request or response processing error: {}".format(error_message), "ERROR")
