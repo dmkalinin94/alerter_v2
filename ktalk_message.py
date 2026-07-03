@@ -4,14 +4,13 @@
 import datetime
 import hashlib
 import html
+import importlib
+import importlib.util
 import re
+import logging
 import time
 import uuid
 from urllib.parse import quote
-try:
-    import requests
-except ImportError:
-    requests = None
 
 from config.secret_masking import MaskSensitiveText as CommonMaskSensitiveText
 from config.local_settings_and_secrets import (
@@ -19,7 +18,7 @@ from config.local_settings_and_secrets import (
     JIRA_THREAD_LINK_TRANSITION_ID, JIRA_THREAD_LINK_TRANSITION_STRICT,
     JIRA_THREAD_LINK_TRANSITION_URL, JIRA_TOKEN, KTALK_AGGREGATE_MESSAGE_REPEAT_COUNT,
     KTALK_AGGREGATE_MESSAGE_REPEAT_INTERVAL_SECONDS, KTALK_BASE_URL,
-    KTALK_BEARER_TOKEN, KTALK_BOT_USER, KTALK_HOST, KTALK_JWT_TOKEN,
+    KTALK_BEARER_TOKEN, KTALK_HOST,
     KTALK_MESSAGE_SEARCH_ATTEMPTS, KTALK_MESSAGE_SEARCH_DELAY_SECONDS,
     KTALK_MESSAGE_SEARCH_LIMIT, KTALK_RETRY_DELAY_SECONDS, KTALK_ROOM_ID,
     KTALK_SAFE_REQUEST_RETRIES, KTALK_SAFE_REQUEST_TIMEOUT, KTALK_SEND_MESSAGE_RETRIES,
@@ -29,6 +28,17 @@ from config.local_settings_and_secrets import (
 
 DATETIME_FORMAT = "%Y.%m.%d %H:%M:%S"
 ATTR_KEY = "alerter_v2.messageAttributes"
+ERROR_TEXT_LIMIT = 1000
+LOGGER = logging.getLogger(__name__)
+requests = None
+
+
+
+def RequestsModule():
+    global requests
+    if requests is None:
+        requests = importlib.import_module("requests")
+    return requests
 
 
 def NowString():
@@ -96,56 +106,63 @@ def KTalkHeaders():
     return {"authorization": bearer_token, "content-type": "application/json", "host": KTALK_HOST, "origin": KTALK_TALK_HOST, "talk-host": KTALK_TALK_HOST, "accept": "application/json"}
 
 
-def BotApiUrl():
-    return "{}/_matrix/client/strangler/api/v1/bot/{}/send_message".format(KTALK_BASE_URL.rstrip("/"), KTALK_JWT_TOKEN)
-
-
-def SendBotMessage(body, root_event_id=None):
-    payload = {"room_id": KTALK_ROOM_ID, "thread_id": root_event_id, "format": "plain", "message": body, "mentions": []}
-    headers = {"x-bot-user": KTALK_BOT_USER}
-    attempts = max(1, int(KTALK_SEND_MESSAGE_RETRIES))
-    for attempt in range(attempts):
-        try:
-            response = requests.post(BotApiUrl(), headers=headers, json=payload, timeout=KTALK_SEND_MESSAGE_TIMEOUT, verify=KTALK_VERIFY_SSL)
-            if 500 <= response.status_code <= 599:
-                return "", "ambiguous HTTP {} from KTalk Bot API".format(response.status_code)
-            if response.status_code in (408, 429) and attempt + 1 < attempts:
-                time.sleep(float(KTALK_RETRY_DELAY_SECONDS))
-                continue
-            response.raise_for_status()
-            data = response.json()
-            event_id = data.get("event_id") or data.get("messageID") or data.get("message_id")
-            if not event_id:
-                return "", "ambiguous KTalk Bot API response without event_id"
-            return event_id, ""
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as error:
-            return "", "ambiguous {}: {}".format(type(error).__name__, error)
-        except Exception as error:
-            return "", "{}: {}".format(type(error).__name__, error)
-    return "", "message was not confirmed"
-
-
 def SafeRequest(method, url, **kwargs):
     attempts = max(1, int(KTALK_SAFE_REQUEST_RETRIES))
     kwargs.setdefault("timeout", KTALK_SAFE_REQUEST_TIMEOUT)
     kwargs.setdefault("verify", KTALK_VERIFY_SSL)
     for attempt in range(attempts):
         try:
-            return requests.request(method, url, **kwargs)
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+            return RequestsModule().request(method, url, **kwargs)
+        except (RequestsModule().exceptions.Timeout, RequestsModule().exceptions.ConnectionError):
             if attempt + 1 >= attempts:
                 raise
             time.sleep(float(KTALK_RETRY_DELAY_SECONDS))
 
 
-def SendMatrixMessage(room_id, message_attributes, payload):
+def LimitedMaskedError(text):
+    return MaskSensitiveText(str(text)[:ERROR_TEXT_LIMIT])
+
+
+def SendMatrixMessageResult(room_id, message_attributes, payload):
     txn_id = BuildTransactionId(message_attributes)
     url = "{}/_matrix/client/r0/rooms/{}/send/m.room.message/{}".format(KTALK_BASE_URL.rstrip("/"), room_id, txn_id)
-    response = SafeRequest("put", url, headers=KTalkHeaders(), json=payload)
-    if response.status_code == 200:
-        data = response.json()
-        return data.get("event_id"), ""
-    return "", "HTTP {} {}".format(response.status_code, response.text[:500])
+    attempts = max(1, int(KTALK_SEND_MESSAGE_RETRIES))
+    root_event_id = payload.get("m.relates_to", {}).get("event_id", "") if isinstance(payload.get("m.relates_to"), dict) else ""
+    for attempt in range(attempts):
+        try:
+            response = SafeRequest("put", url, headers=KTalkHeaders(), json=payload, timeout=KTALK_SEND_MESSAGE_TIMEOUT)
+            status = response.status_code
+            ambiguous = 500 <= status <= 599
+            LOGGER.info("Matrix message send: room_id=%s root_event_id_present=%s attempt=%s/%s http_status=%s ambiguous=%s", room_id, bool(root_event_id), attempt + 1, attempts, status, ambiguous)
+            if 200 <= status <= 299:
+                try:
+                    data = response.json()
+                except ValueError as error:
+                    return "", LimitedMaskedError("ambiguous Matrix response JSON error: {}".format(error)), True
+                event_id = data.get("event_id", "")
+                if event_id:
+                    return event_id, "", False
+                return "", "Matrix message delivery was not confirmed: response without event_id", True
+            if ambiguous:
+                return "", LimitedMaskedError("ambiguous HTTP {} from KTalk Matrix API: {}".format(status, response.text[:ERROR_TEXT_LIMIT])), True
+            if status in (408, 429):
+                error = LimitedMaskedError("temporary HTTP {} from KTalk Matrix API: {}".format(status, response.text[:ERROR_TEXT_LIMIT]))
+                if attempt + 1 < attempts:
+                    time.sleep(float(KTALK_RETRY_DELAY_SECONDS))
+                    continue
+                return "", error, False
+            return "", LimitedMaskedError("HTTP {} from KTalk Matrix API: {}".format(status, response.text[:ERROR_TEXT_LIMIT])), False
+        except (RequestsModule().exceptions.Timeout, RequestsModule().exceptions.ConnectionError) as error:
+            LOGGER.info("Matrix message send: room_id=%s root_event_id_present=%s attempt=%s/%s http_status=none ambiguous=True", room_id, bool(root_event_id), attempt + 1, attempts)
+            return "", LimitedMaskedError("ambiguous {} during KTalk Matrix API request: {}".format(type(error).__name__, error)), True
+        except Exception as error:
+            return "", LimitedMaskedError("{} during KTalk Matrix API request: {}".format(type(error).__name__, error)), False
+    return "", "Matrix message delivery was not confirmed", True
+
+
+def SendMatrixMessage(room_id, message_attributes, payload):
+    event_id, error, ambiguous = SendMatrixMessageResult(room_id, message_attributes, payload)
+    return event_id, error
 
 
 def EventsFromMessagesData(data):
@@ -183,17 +200,24 @@ def FindMessageByAttributes(room_id, message_attributes, body=""):
 def SendMessageAndGetId(room_id, body, message_attributes, root_event_id=None):
     found = FindMessageByAttributes(room_id, message_attributes, body)
     if found:
+        LOGGER.info("Matrix message send skipped: room_id=%s root_event_id_present=%s existing_event_id_found=True", room_id, bool(root_event_id))
         return found, ""
-    event_id, error = SendBotMessage(body, root_event_id)
+
+    payload = BuildMessageAttributesPayload(body, message_attributes, root_event_id)
+    event_id, error, ambiguous = SendMatrixMessageResult(room_id, message_attributes, payload)
     if event_id:
         return event_id, ""
-    for _ in range(max(1, int(KTALK_MESSAGE_SEARCH_ATTEMPTS))):
-        if float(KTALK_MESSAGE_SEARCH_DELAY_SECONDS) > 0:
-            time.sleep(min(float(KTALK_MESSAGE_SEARCH_DELAY_SECONDS), 2.0))
-        found = FindMessageByAttributes(room_id, message_attributes, body)
-        if found:
-            return found, ""
-    return "", MaskSensitiveText(error or "message was not confirmed")
+
+    if ambiguous:
+        attempts = max(1, int(KTALK_MESSAGE_SEARCH_ATTEMPTS))
+        for attempt in range(attempts):
+            if float(KTALK_MESSAGE_SEARCH_DELAY_SECONDS) > 0:
+                time.sleep(min(float(KTALK_MESSAGE_SEARCH_DELAY_SECONDS), 2.0))
+            found = FindMessageByAttributes(room_id, message_attributes, body)
+            LOGGER.info("Matrix message confirmation search: room_id=%s root_event_id_present=%s attempt=%s/%s existing_event_id_found=%s", room_id, bool(root_event_id), attempt + 1, attempts, bool(found))
+            if found:
+                return found, ""
+    return "", MaskSensitiveText(error or "Matrix message delivery was not confirmed")
 
 
 def SendThreadReply(root_message_id, body, message_attributes=""):
@@ -271,7 +295,7 @@ def AttachKTalkThreadLinkToJira(alert_data, thread_root_event_id):
         return "Jira thread-link transition skipped: jiraKey is empty"
     thread_link = BuildKTalkThreadLink(KTALK_ROOM_ID, thread_root_event_id)
     payload = {"transition": {"id": JIRA_THREAD_LINK_TRANSITION_ID}, "fields": {JIRA_THREAD_LINK_CUSTOM_FIELD: thread_link}}
-    response = requests.post(JIRA_THREAD_LINK_TRANSITION_URL.format(jira_key), headers={"Authorization": JIRA_TOKEN, "Accept": "application/json", "Content-Type": "application/json"}, json=payload, timeout=KTALK_SAFE_REQUEST_TIMEOUT, verify=KTALK_VERIFY_SSL)
+    response = RequestsModule().post(JIRA_THREAD_LINK_TRANSITION_URL.format(jira_key), headers={"Authorization": JIRA_TOKEN, "Accept": "application/json", "Content-Type": "application/json"}, json=payload, timeout=KTALK_SAFE_REQUEST_TIMEOUT, verify=KTALK_VERIFY_SSL)
     if response.status_code == 204:
         return ""
     return "Jira thread-link transition failed: HTTP {} {}".format(response.status_code, response.text[:500])
@@ -280,7 +304,7 @@ def SendRoot(root_key, alert_data, step_data):
     new_step = step_data.copy(); new_step.setdefault("notificationErrors", [])
     if new_step.get("messageID"):
         new_step.update({"stepSate": 1, "errorMessage": "", "sended": 1}); return True, new_step
-    if requests is None:
+    if importlib.util.find_spec("requests") is None:
         new_step.update({"stepSate": 2, "errorMessage": "requests module is not available", "sended": 0}); return False, new_step
     if not new_step.get("sendTime"):
         new_step["sendTime"] = NowString()
