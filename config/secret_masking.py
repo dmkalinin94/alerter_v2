@@ -4,7 +4,7 @@
 import re
 
 SECRET_NAMES = (
-    "JIRA_TOKEN", "INSIGHT_AUTH_TOKEN", "KTALK_JWT_TOKEN", "KTALK_BEARER_TOKEN",
+    "JIRA_TOKEN", "INSIGHT_AUTH_TOKEN", "KTALK_BEARER_TOKEN",
     "RECIPIENT_RESOLVER_TOKEN", "DB_PASSWORD",
 )
 
@@ -21,7 +21,6 @@ def MaskSensitiveText(text, settings_module=None):
             secret = getattr(settings_module, name, "")
             if secret:
                 safe = safe.replace(str(secret), "***")
-    safe = re.sub(r"/bot/[^/]+/send_message", "/bot/***/send_message", safe)
     safe = re.sub(r"Authorization\s*[:=]\s*[^\n,;]+", "Authorization: ***", safe, flags=re.IGNORECASE)
     safe = re.sub(r"\b(Bearer|Basic)\s+[^\s,;]+", r"\1 ***", safe)
     safe = re.sub(r"(token|password)\s*=\s*[^\s,;&]+", r"\1=***", safe, flags=re.IGNORECASE)
