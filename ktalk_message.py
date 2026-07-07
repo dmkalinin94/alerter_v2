@@ -300,8 +300,23 @@ def AttachKTalkThreadLinkToJira(alert_data, thread_root_event_id):
         return ""
     return "Jira thread-link transition failed: HTTP {} {}".format(response.status_code, response.text[:500])
 
+def MarkKTalkUserStepTechnicalError(new_step, error_message):
+    new_step.update({
+        "stepSate": 2,
+        "errorMessage": LimitedMaskedError(error_message),
+        "retryNumber": int(new_step.get("retryNumber", 0)) + 1,
+        "sended": 0
+    })
+    return False, new_step
+
+
+def MarkKTalkUserStepSuccess(new_step):
+    new_step.update({"stepSate": 1, "errorMessage": "", "sended": 1})
+    return True, new_step
+
+
 def SendRoot(root_key, alert_data, step_data):
-    new_step = step_data.copy(); new_step.setdefault("notificationErrors", [])
+    new_step = step_data.copy()
     if new_step.get("messageID"):
         new_step.update({"stepSate": 1, "errorMessage": "", "sended": 1}); return True, new_step
     if importlib.util.find_spec("requests") is None:
@@ -319,14 +334,51 @@ def SendRoot(root_key, alert_data, step_data):
     if transition_error:
         new_step["threadLinkTransitionError"] = MaskSensitiveText(transition_error)
     new_step.update({"stepSate": 1, "errorMessage": "", "messageID": event_id, "messageDeliveryTime": NowString(), "sended": 1})
-    errors = InviteAllUsers(GetRecipients(alert_data)) + MentionAllUsers(event_id, GetRecipients(alert_data))
-    if errors:
-        new_step["notificationErrors"] = errors
-        msg = BuildNotificationErrorsMessage(errors)
-        service_id, service_error = SendThreadReply(event_id, msg)
-        if service_error:
-            new_step["notificationErrors"].append({"operation": "notification_errors_message", "user": "", "error": service_error})
     return True, new_step
+
+
+def InviteKTalkUsers(root_key, alert_data, step_data):
+    new_step = step_data.copy()
+    if new_step.get("sended") == 1 or new_step.get("stepSate") == 1:
+        return True, new_step
+    if importlib.util.find_spec("requests") is None:
+        return MarkKTalkUserStepTechnicalError(new_step, "requests module is not available")
+    try:
+        recipients = GetRecipients(alert_data)
+        if not isinstance(recipients, list):
+            return MarkKTalkUserStepTechnicalError(new_step, "recipient list is not a list")
+        for user in recipients:
+            try:
+                InviteUser(user)
+            except Exception:
+                pass
+        return MarkKTalkUserStepSuccess(new_step)
+    except Exception as error:
+        return MarkKTalkUserStepTechnicalError(new_step, "{}: {}".format(type(error).__name__, error))
+
+
+def MentionKTalkUsers(root_key, alert_data, step_data):
+    new_step = step_data.copy()
+    if new_step.get("sended") == 1 or new_step.get("stepSate") == 1:
+        return True, new_step
+    if importlib.util.find_spec("requests") is None:
+        return MarkKTalkUserStepTechnicalError(new_step, "requests module is not available")
+    root_step = FindStep(alert_data, ("sendCriticalRootMessage", "sendLowSeverityRootMessage"))
+    root_message_id = root_step.get("messageID", "")
+    if not root_message_id:
+        return MarkKTalkUserStepTechnicalError(new_step, "root message is not completed")
+    try:
+        recipients = GetRecipients(alert_data)
+        if not isinstance(recipients, list):
+            return MarkKTalkUserStepTechnicalError(new_step, "recipient list is not a list")
+        for user in recipients:
+            try:
+                MentionUser(root_message_id, user)
+            except Exception:
+                pass
+        return MarkKTalkUserStepSuccess(new_step)
+    except Exception as error:
+        return MarkKTalkUserStepTechnicalError(new_step, "{}: {}".format(type(error).__name__, error))
 
 
 def SendLowSeverityRootMessage(root_key, alert_data, step_data):
