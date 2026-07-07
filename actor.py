@@ -255,7 +255,7 @@ def GetActionOrder(alert_data):
 
 
 def IsMandatoryStep(step_name):
-    return step_name in ("resolveInsightId", "loadInsightData", "resolveKTalkUsers", "createLowSeverityJiraIncident", "createCriticalJiraIncident", "sendLowSeverityRootMessage", "sendCriticalRootMessage")
+    return step_name in ("resolveInsightId", "loadInsightData", "resolveKTalkUsers", "createLowSeverityJiraIncident", "createCriticalJiraIncident", "sendLowSeverityRootMessage", "sendCriticalRootMessage", "inviteKTalkUsers", "mentionKTalkUsers")
 
 
 def ProcessPackage(args, root_key, alert_data, counters, handlers):
@@ -330,6 +330,8 @@ STEP_HANDLERS = {
     ("JiraINC", "createCriticalJiraIncident"): jira_inc.CreateCriticalJiraIncident,
     ("KTalkMessage", "sendLowSeverityRootMessage"): ktalk_message.SendLowSeverityRootMessage,
     ("KTalkMessage", "sendCriticalRootMessage"): ktalk_message.SendCriticalRootMessage,
+    ("KTalkMessage", "inviteKTalkUsers"): ktalk_message.InviteKTalkUsers,
+    ("KTalkMessage", "mentionKTalkUsers"): ktalk_message.MentionKTalkUsers,
     ("KTalkMessage", "sendLowSeverityAggregateMessage"): ktalk_message.SendLowSeverityAggregateMessage,
     ("KTalkMessage", "sendCriticalAggregateMessage"): ktalk_message.SendCriticalAggregateMessage,
 }

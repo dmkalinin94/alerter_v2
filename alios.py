@@ -26,11 +26,11 @@ BASE_ACTIONS = [
 
 SEVERITY_ACTION = {
     "0": [],
-    "1": ["resolveKTalkUsers", "createLowSeverityJiraIncident", "sendLowSeverityRootMessage", "sendLowSeverityAggregateMessage"],
-    "2": ["resolveKTalkUsers", "createLowSeverityJiraIncident", "sendLowSeverityRootMessage", "sendLowSeverityAggregateMessage"],
-    "3": ["resolveKTalkUsers", "createLowSeverityJiraIncident", "sendLowSeverityRootMessage", "sendLowSeverityAggregateMessage"],
-    "4": ["resolveKTalkUsers", "createLowSeverityJiraIncident", "sendLowSeverityRootMessage", "sendLowSeverityAggregateMessage"],
-    "5": ["resolveKTalkUsers", "createCriticalJiraIncident", "sendCriticalRootMessage", "sendCriticalAggregateMessage"]
+    "1": ["resolveKTalkUsers", "createLowSeverityJiraIncident", "sendLowSeverityRootMessage", "inviteKTalkUsers", "mentionKTalkUsers", "sendLowSeverityAggregateMessage"],
+    "2": ["resolveKTalkUsers", "createLowSeverityJiraIncident", "sendLowSeverityRootMessage", "inviteKTalkUsers", "mentionKTalkUsers", "sendLowSeverityAggregateMessage"],
+    "3": ["resolveKTalkUsers", "createLowSeverityJiraIncident", "sendLowSeverityRootMessage", "inviteKTalkUsers", "mentionKTalkUsers", "sendLowSeverityAggregateMessage"],
+    "4": ["resolveKTalkUsers", "createLowSeverityJiraIncident", "sendLowSeverityRootMessage", "inviteKTalkUsers", "mentionKTalkUsers", "sendLowSeverityAggregateMessage"],
+    "5": ["resolveKTalkUsers", "createCriticalJiraIncident", "sendCriticalRootMessage", "inviteKTalkUsers", "mentionKTalkUsers", "sendCriticalAggregateMessage"]
 }
 
 from config.local_settings_and_secrets import KTALK_AGGREGATE_MESSAGE_REPEAT_COUNT
@@ -61,12 +61,21 @@ ACTION_STEP_TEMPLATES = {
     "sendLowSeverityRootMessage": {
         "stepName": "sendLowSeverityRootMessage", "moduleName": "KTalkMessage", "stepSate": 0,
         "errorMessage": "", "retryNumber": 0, "messageAttributes": "",
-        "messageID": "", "messageDeliveryTime": "", "sended": 0, "notificationErrors": []
+        "messageID": "", "messageDeliveryTime": "", "sended": 0
     },
     "sendCriticalRootMessage": {
         "stepName": "sendCriticalRootMessage", "moduleName": "KTalkMessage", "stepSate": 0,
         "errorMessage": "", "retryNumber": 0, "messageAttributes": "",
-        "messageID": "", "messageDeliveryTime": "", "sended": 0, "notificationErrors": []
+        "messageID": "", "messageDeliveryTime": "", "sended": 0
+    },
+
+    "inviteKTalkUsers": {
+        "stepName": "inviteKTalkUsers", "moduleName": "KTalkMessage", "stepSate": 0,
+        "errorMessage": "", "retryNumber": 0, "sended": 0
+    },
+    "mentionKTalkUsers": {
+        "stepName": "mentionKTalkUsers", "moduleName": "KTalkMessage", "stepSate": 0,
+        "errorMessage": "", "retryNumber": 0, "sended": 0
     },
     "sendLowSeverityAggregateMessage": {
         "stepName": "sendLowSeverityAggregateMessage", "moduleName": "KTalkMessage", "stepSate": 1,
@@ -298,7 +307,9 @@ def ValidateStepSpecificFields(step_data, root_key):
             RequireType(step_data, field, str, root_key, step_name)
         if int(step_data.get("sended", 0)) not in (0, 1):
             raise ValueError("Invalid sended for step {} root key {}".format(step_name, root_key))
-        RequireType(step_data, "notificationErrors", list, root_key, step_name)
+    elif step_name in ("inviteKTalkUsers", "mentionKTalkUsers"):
+        if int(step_data.get("sended", 0)) not in (0, 1):
+            raise ValueError("Invalid sended for step {} root key {}".format(step_name, root_key))
     elif step_name in ("sendLowSeverityAggregateMessage", "sendCriticalAggregateMessage"):
         for field in ("targetEventBalance", "deliveredEventBalance", "repeatNumber", "repeatLimit", "successfulDeliveryNumber"):
             if not isinstance(step_data.get(field), int) or step_data.get(field) < 0:
