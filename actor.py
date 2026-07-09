@@ -175,21 +175,21 @@ def UpdateAction(args, root_key, action_name, action_data):
         "--state-file",
         args.state_file,
         "--path",
-        "$.{}.action.{}".format(root_key, action_name),
+        "$.{}.steps.{}".format(root_key, action_name),
         "--json-data",
         json.dumps(action_data, ensure_ascii=False)
     ]
     try:
         result = RunCommand(command, CLI_COMMAND_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired as error:
-        WriteLog("CLI update timed out after {} seconds for root key {} action {}: {}".format(CLI_COMMAND_TIMEOUT_SECONDS, root_key, action_name, error), "ERROR")
+        WriteLog("CLI update timed out after {} seconds for root key {} step {}: {}".format(CLI_COMMAND_TIMEOUT_SECONDS, root_key, action_name, error), "ERROR")
         return False
     if result.returncode != 0:
-        WriteLog("CLI update failed for root key {} action {} with code {}".format(root_key, action_name, result.returncode), "ERROR")
+        WriteLog("CLI update failed for root key {} step {} with code {}".format(root_key, action_name, result.returncode), "ERROR")
         WriteLog("CLI update stderr: {}".format(result.stderr.strip()), "ERROR")
         WriteLog("CLI update stdout: {}".format(result.stdout.strip()), "ERROR")
         return False
-    WriteLog("Action {} updated through CLI for root key {}".format(action_name, root_key), "INFO")
+    WriteLog("Step {} updated through CLI for root key {}".format(action_name, root_key), "INFO")
     return True
 
 
@@ -215,11 +215,11 @@ def HandleResolveInsightId(root_key, alert_data, action_data):
 
     if result.get("success") is True:
         new_data = action_data.copy()
-        new_data.update({"stepSate": 1, "errorMessage": "", "retryNumber": retry_number, "insightId": result.get("insightId", "")})
+        new_data.update({"stepState": 1, "errorMessage": "", "retryNumber": retry_number, "insightId": result.get("insightId", "")})
         return True, new_data
 
     new_data = action_data.copy()
-    new_data.update({"stepSate": 2, "errorMessage": result.get("errorMessage", "Unknown InsightID error"), "retryNumber": retry_number + 1, "insightId": ""})
+    new_data.update({"stepState": 2, "errorMessage": result.get("errorMessage", "Unknown InsightID error"), "retryNumber": retry_number + 1, "insightId": ""})
     return False, new_data
 
 
@@ -227,8 +227,8 @@ def HandleLoadInsightData(root_key, alert_data, action_data):
     retry_number = GetRetryNumber(action_data)
     WriteLog("InsightData started for root key {}".format(root_key), "INFO")
     try:
-        _, insight_id_data = alios.FindStepByName(alert_data["action"], "resolveInsightId")
-        if not isinstance(insight_id_data, dict) or insight_id_data.get("stepSate") != 1:
+        _, insight_id_data = alios.FindStepByName(alert_data["steps"], "resolveInsightId")
+        if not isinstance(insight_id_data, dict) or insight_id_data.get("stepState") != 1:
             raise ValueError("InsightID action is not completed")
         insight_id = insight_id_data.get("insightId")
         if not isinstance(insight_id, str) or insight_id.strip() == "":
@@ -237,21 +237,21 @@ def HandleLoadInsightData(root_key, alert_data, action_data):
     except Exception as error:
         error_message = str(error)[:2000]
         WriteLog("InsightData structure error for root key {}: {}".format(root_key, error_message), "ERROR")
-        new_data = action_data.copy(); new_data.update({"stepSate": 2, "errorMessage": error_message, "retryNumber": retry_number + 1, "isActiv": 0, "recipientADUserList": []}); return False, new_data
+        new_data = action_data.copy(); new_data.update({"stepState": 2, "errorMessage": error_message, "retryNumber": retry_number + 1, "isActiv": 0, "recipientADUserList": []}); return False, new_data
 
     WriteLog("InsightData uses insight_id {} for root key {}".format(insight_id, root_key), "INFO")
     result = insight.GetInsightData(insight_id, lambda message, level: WriteLog(message, level, "insight"))
     error_message = insight.MaskSensitiveText(result.get("errorMessage", ""))[:2000]
     if result.get("success") is True:
         WriteLog("InsightData completed for root key {} isActiv={} recipients={}".format(root_key, result.get("isActiv", 0), len(result.get("recipientADUserList", []))), "INFO")
-        new_data = action_data.copy(); new_data.update({"stepSate": 1, "errorMessage": "", "retryNumber": retry_number, "isActiv": int(result.get("isActiv", 0)), "fullName": result.get("fullName", ""), "functionObjectKey": result.get("functionObjectKey", ""), "jiraIncidentTypeKey": result.get("jiraIncidentTypeKey", ""), "recipientADUserList": result.get("recipientADUserList", [])}); return True, new_data
+        new_data = action_data.copy(); new_data.update({"stepState": 1, "errorMessage": "", "retryNumber": retry_number, "isActiv": int(result.get("isActiv", 0)), "fullName": result.get("fullName", ""), "functionObjectKey": result.get("functionObjectKey", ""), "jiraIncidentTypeKey": result.get("jiraIncidentTypeKey", ""), "recipientADUserList": result.get("recipientADUserList", [])}); return True, new_data
 
     WriteLog("InsightData error for root key {}: {}".format(root_key, error_message), "ERROR")
-    new_data = action_data.copy(); new_data.update({"stepSate": 2, "errorMessage": error_message, "retryNumber": retry_number + 1, "isActiv": 0, "recipientADUserList": []}); return False, new_data
+    new_data = action_data.copy(); new_data.update({"stepState": 2, "errorMessage": error_message, "retryNumber": retry_number + 1, "isActiv": 0, "recipientADUserList": []}); return False, new_data
 
 
 def GetActionOrder(alert_data):
-    return alios.GetOrderedStepKeys(alert_data.get("action", {}))
+    return alios.GetOrderedStepKeys(alert_data)
 
 
 def IsMandatoryStep(step_name):
@@ -265,27 +265,27 @@ def ProcessPackage(args, root_key, alert_data, counters, handlers):
         counters["structure_errors"] += 1
         WriteLog("Alert data is not a dictionary for root key {}".format(root_key), "ERROR")
         return
-    action_dictionary = alert_data.get("action")
-    if not isinstance(action_dictionary, dict):
+    steps_dictionary = alert_data.get("steps")
+    if not isinstance(steps_dictionary, dict):
         counters["structure_errors"] += 1
-        WriteLog("Action value is not a dictionary for root key {}".format(root_key), "ERROR")
+        WriteLog("Steps value is not a dictionary for root key {}".format(root_key), "ERROR")
         return
     try:
         step_order = GetActionOrder(alert_data)
     except ValueError as error:
         counters["structure_errors"] += 1
-        WriteLog("Action order error for root key {}: {}".format(root_key, error), "ERROR")
+        WriteLog("Step order error for root key {}: {}".format(root_key, error), "ERROR")
         return
     for step_number in step_order:
-        step_data = action_dictionary[step_number]
+        step_data = steps_dictionary[step_number]
         if not isinstance(step_data, dict):
             counters["structure_errors"] += 1
-            WriteLog("Action step {} is not a dictionary for root key {}".format(step_number, root_key), "ERROR")
+            WriteLog("Step {} is not a dictionary for root key {}".format(step_number, root_key), "ERROR")
             return
         step_name = step_data.get("stepName")
         module_name = step_data.get("moduleName")
         WriteLog("Current step for root key {}: #{} {}.{}".format(root_key, step_number, module_name, step_name), "INFO")
-        if step_data.get("stepSate") == 1:
+        if step_data.get("stepState") == 1:
             counters["skipped_done"] += 1
             continue
         handler = handlers.get((module_name, step_name))
@@ -303,21 +303,21 @@ def ProcessPackage(args, root_key, alert_data, counters, handlers):
             new_step_data = step_data.copy()
             new_step_data["retryNumber"] = retry_number + 1
             new_step_data["errorMessage"] = ("{}: {}".format(type(error).__name__, str(error)))[:2000]
-            new_step_data["stepSate"] = 2 if IsMandatoryStep(step_name) else 0
+            new_step_data["stepState"] = 2 if IsMandatoryStep(step_name) else 0
             success = False
         new_step_data.pop("stepNumber", None)
         if not success and not IsMandatoryStep(step_name):
-            new_step_data["stepSate"] = 0 if int(new_step_data.get("repeatNumber", 0)) < int(new_step_data.get("repeatLimit", 1)) else 1
+            new_step_data["stepState"] = 0 if int(new_step_data.get("repeatNumber", 0)) < int(new_step_data.get("repeatLimit", 1)) else 1
         if not UpdateAction(args, root_key, step_number, new_step_data):
             counters["cli_write_errors"] += 1
             return
-        action_dictionary[step_number] = new_step_data
+        steps_dictionary[step_number] = new_step_data
         if success:
-            counters["actions_success"] += 1
-            if new_step_data.get("stepSate") == 0:
+            counters["steps_success"] += 1
+            if new_step_data.get("stepState") == 0:
                 WriteLog("Step #{} {} waits for continuation".format(step_number, step_name), "INFO")
             continue
-        counters["actions_error"] += 1
+        counters["steps_error"] += 1
         WriteLog("Step #{} {} failed for root key {}".format(step_number, step_name, root_key), "ERROR")
         if IsMandatoryStep(step_name):
             return
@@ -340,9 +340,9 @@ def ProcessAlertPackages(args, alert_dictionary_list):
     handlers = STEP_HANDLERS
     counters = {
         "processed": 0,
-        "actions_success": 0,
+        "steps_success": 0,
         "skipped_done": 0,
-        "actions_error": 0,
+        "steps_error": 0,
         "structure_errors": 0,
         "cli_write_errors": 0
     }
@@ -437,9 +437,9 @@ def Main():
 
         WriteLog("Actor finished", "INFO")
         WriteLog("Processed packages: {}".format(counters["processed"]), "INFO")
-        WriteLog("Successful actions: {}".format(counters["actions_success"]), "INFO")
+        WriteLog("Successful steps: {}".format(counters["steps_success"]), "INFO")
         WriteLog("Skipped completed actions: {}".format(counters["skipped_done"]), "INFO")
-        WriteLog("Actions with errors: {}".format(counters["actions_error"]), "INFO")
+        WriteLog("Steps with errors: {}".format(counters["steps_error"]), "INFO")
         WriteLog("Packages with structure errors: {}".format(counters["structure_errors"]), "INFO")
         WriteLog("Package processing errors: {}".format(counters.get("package_errors", 0)), "INFO")
         WriteLog("CLI write errors: {}".format(counters["cli_write_errors"]), "INFO")

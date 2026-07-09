@@ -172,25 +172,25 @@ def AddRequiredActions(args, root_key):
 
 
 def CheckActionsCompleted(root_key, alert_data):
-    action_dictionary = alert_data.get("action")
-    if not isinstance(action_dictionary, dict):
-        WriteLog("Root key {} cannot be deleted because action dictionary is missing or invalid".format(root_key), "INFO")
+    steps_dictionary = alert_data.get("steps")
+    if not isinstance(steps_dictionary, dict):
+        WriteLog("Root key {} cannot be deleted because steps dictionary is missing or invalid".format(root_key), "INFO")
         return False
 
-    for action_name in action_dictionary:
-        action_data = action_dictionary[action_name]
-        if not isinstance(action_data, dict):
-            WriteLog("Root key {} cannot be deleted because action {} has invalid structure".format(root_key, action_name), "INFO")
+    for step_name in alert_data.get("stepOrder", list(steps_dictionary.keys())):
+        step_data = steps_dictionary.get(step_name)
+        if not isinstance(step_data, dict):
+            WriteLog("Root key {} cannot be deleted because step {} has invalid structure".format(root_key, step_name), "INFO")
             return False
-        if action_data.get("stepSate") != 1:
-            WriteLog("Root key {} cannot be deleted because action {} is not completed: {}".format(
+        if step_data.get("stepState") != 1:
+            WriteLog("Root key {} cannot be deleted because step {} is not completed: {}".format(
                 root_key,
-                action_name,
-                action_data.get("stepSate")
+                step_name,
+                step_data.get("stepState")
             ), "INFO")
             return False
 
-    WriteLog("All actions are completed for root key {}".format(root_key), "INFO")
+    WriteLog("All steps are completed for root key {}".format(root_key), "INFO")
     return True
 
 def IsCriticalEventActive(event_data):
