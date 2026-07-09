@@ -1166,7 +1166,9 @@ def Main():
             CloseStateFileLock(lock_file, args.state_file)
         except Exception as unlock_error:
             WriteLog("Execution failed while unlocking: {}".format(unlock_error), "ERROR")
-        WriteLog("Execution failed: {}".format(error), "ERROR")
+        error_message = "Execution failed: {}".format(error)
+        WriteLog(error_message, "ERROR")
+        print(error_message, file=sys.stderr)
         sys.exit(1)
 
 

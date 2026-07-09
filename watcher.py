@@ -461,7 +461,13 @@ def ProcessAlertPackages(args, alert_dictionary_list):
             counters["errors"] = counters["errors"] + 1
             continue
 
-        WriteLog("Processing package rootKey={}, schemaVersion={}".format(root_key, alert_data.get("schemaVersion")), "INFO")
+        WriteLog(
+            "Processing package rootKey={}, schemaVersion={}".format(
+                root_key,
+                alert_data.get("schemaVersion")
+            ),
+            "INFO"
+        )
         ProcessPackage(args, root_key, alert_data, counters)
 
     return counters
