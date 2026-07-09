@@ -52,7 +52,7 @@ def MaskSensitiveText(text):
 def FindStep(alert_data, names):
     if isinstance(names, str):
         names = (names,)
-    for step in alert_data.get("action", {}).values():
+    for step in alert_data.get("steps", {}).values():
         if isinstance(step, dict) and step.get("stepName") in names:
             return step
     return {}
@@ -302,7 +302,7 @@ def AttachKTalkThreadLinkToJira(alert_data, thread_root_event_id):
 
 def MarkKTalkUserStepTechnicalError(new_step, error_message):
     new_step.update({
-        "stepSate": 2,
+        "stepState": 2,
         "errorMessage": LimitedMaskedError(error_message),
         "retryNumber": int(new_step.get("retryNumber", 0)) + 1,
         "sended": 0
@@ -311,35 +311,35 @@ def MarkKTalkUserStepTechnicalError(new_step, error_message):
 
 
 def MarkKTalkUserStepSuccess(new_step):
-    new_step.update({"stepSate": 1, "errorMessage": "", "sended": 1})
+    new_step.update({"stepState": 1, "errorMessage": "", "sended": 1})
     return True, new_step
 
 
 def SendRoot(root_key, alert_data, step_data):
     new_step = step_data.copy()
     if new_step.get("messageID"):
-        new_step.update({"stepSate": 1, "errorMessage": "", "sended": 1}); return True, new_step
+        new_step.update({"stepState": 1, "errorMessage": "", "sended": 1}); return True, new_step
     if importlib.util.find_spec("requests") is None:
-        new_step.update({"stepSate": 2, "errorMessage": "requests module is not available", "sended": 0}); return False, new_step
+        new_step.update({"stepState": 2, "errorMessage": "requests module is not available", "sended": 0}); return False, new_step
     if not new_step.get("sendTime"):
         new_step["sendTime"] = NowString()
     attrs = BuildMessageAttributes(root_key, new_step, "root"); new_step["messageAttributes"] = attrs
     body = BuildRootMessage(root_key, alert_data, new_step)
     event_id, error = SendMessageAndGetId(KTALK_ROOM_ID, body, attrs)
     if not event_id:
-        new_step.update({"stepSate": 2, "errorMessage": error, "sended": 0}); return False, new_step
+        new_step.update({"stepState": 2, "errorMessage": error, "sended": 0}); return False, new_step
     transition_error = AttachKTalkThreadLinkToJira(alert_data, event_id)
     if transition_error and JIRA_THREAD_LINK_TRANSITION_STRICT:
-        new_step.update({"stepSate": 2, "errorMessage": MaskSensitiveText(transition_error), "sended": 0}); return False, new_step
+        new_step.update({"stepState": 2, "errorMessage": MaskSensitiveText(transition_error), "sended": 0}); return False, new_step
     if transition_error:
         new_step["threadLinkTransitionError"] = MaskSensitiveText(transition_error)
-    new_step.update({"stepSate": 1, "errorMessage": "", "messageID": event_id, "messageDeliveryTime": NowString(), "sended": 1})
+    new_step.update({"stepState": 1, "errorMessage": "", "messageID": event_id, "messageDeliveryTime": NowString(), "sended": 1})
     return True, new_step
 
 
 def InviteKTalkUsers(root_key, alert_data, step_data):
     new_step = step_data.copy()
-    if new_step.get("sended") == 1 or new_step.get("stepSate") == 1:
+    if new_step.get("sended") == 1 or new_step.get("stepState") == 1:
         return True, new_step
     if importlib.util.find_spec("requests") is None:
         return MarkKTalkUserStepTechnicalError(new_step, "requests module is not available")
@@ -359,7 +359,7 @@ def InviteKTalkUsers(root_key, alert_data, step_data):
 
 def MentionKTalkUsers(root_key, alert_data, step_data):
     new_step = step_data.copy()
-    if new_step.get("sended") == 1 or new_step.get("stepSate") == 1:
+    if new_step.get("sended") == 1 or new_step.get("stepState") == 1:
         return True, new_step
     if importlib.util.find_spec("requests") is None:
         return MarkKTalkUserStepTechnicalError(new_step, "requests module is not available")
@@ -398,10 +398,10 @@ def SendAggregate(root_key, alert_data, step_data):
     repeat_limit = int(new_step.get("repeatLimit", KTALK_AGGREGATE_MESSAGE_REPEAT_COUNT))
     repeat_number = int(new_step.get("repeatNumber", 0))
     if repeat_number >= repeat_limit:
-        new_step.update({"stepSate": 1, "deliveredEventBalance": int(new_step.get("targetEventBalance", 0)), "nextDeliveryTime": "", "messageAttributes": ""}); return True, new_step
+        new_step.update({"stepState": 1, "deliveredEventBalance": int(new_step.get("targetEventBalance", 0)), "nextDeliveryTime": "", "messageAttributes": ""}); return True, new_step
     next_time = new_step.get("nextDeliveryTime", "")
     if next_time and datetime.datetime.now() < datetime.datetime.strptime(next_time, DATETIME_FORMAT):
-        new_step["stepSate"] = 0; return True, new_step
+        new_step["stepState"] = 0; return True, new_step
     attrs = BuildMessageAttributes(root_key, new_step, "aggregate"); new_step["messageAttributes"] = attrs
     body = BuildAggregateMessage(root_key, alert_data, new_step)
     event_id, error = SendMessageAndGetId(KTALK_ROOM_ID, body, attrs, root_message_id)
@@ -412,9 +412,9 @@ def SendAggregate(root_key, alert_data, step_data):
     else:
         new_step["retryNumber"] = int(new_step.get("retryNumber", 0)) + 1; new_step["errorMessage"] = error; new_step["sended"] = 0
     if repeat_number >= repeat_limit:
-        new_step.update({"stepSate": 1, "deliveredEventBalance": int(new_step.get("targetEventBalance", 0)), "nextDeliveryTime": "", "messageAttributes": ""})
+        new_step.update({"stepState": 1, "deliveredEventBalance": int(new_step.get("targetEventBalance", 0)), "nextDeliveryTime": "", "messageAttributes": ""})
     else:
-        new_step["stepSate"] = 0
+        new_step["stepState"] = 0
         new_step["nextDeliveryTime"] = (datetime.datetime.now() + datetime.timedelta(seconds=int(KTALK_AGGREGATE_MESSAGE_REPEAT_INTERVAL_SECONDS))).strftime(DATETIME_FORMAT)
     return True, new_step
 

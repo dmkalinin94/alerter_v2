@@ -172,25 +172,23 @@ def AddRequiredActions(args, root_key):
 
 
 def CheckActionsCompleted(root_key, alert_data):
-    action_dictionary = alert_data.get("action")
-    if not isinstance(action_dictionary, dict):
-        WriteLog("Root key {} cannot be deleted because action dictionary is missing or invalid".format(root_key), "INFO")
+    steps = alert_data.get("steps")
+    step_order = alert_data.get("stepOrder")
+    if not isinstance(steps, dict) or not isinstance(step_order, list):
+        WriteLog("Root key {} cannot be deleted because steps or stepOrder is missing or invalid".format(root_key), "INFO")
         return False
-
-    for action_name in action_dictionary:
-        action_data = action_dictionary[action_name]
-        if not isinstance(action_data, dict):
-            WriteLog("Root key {} cannot be deleted because action {} has invalid structure".format(root_key, action_name), "INFO")
+    for step_name in step_order:
+        if step_name not in steps:
+            WriteLog("Root key {} cannot be deleted because step {} is missing".format(root_key, step_name), "INFO")
             return False
-        if action_data.get("stepSate") != 1:
-            WriteLog("Root key {} cannot be deleted because action {} is not completed: {}".format(
-                root_key,
-                action_name,
-                action_data.get("stepSate")
-            ), "INFO")
+        step_data = steps[step_name]
+        if not isinstance(step_data, dict):
+            WriteLog("Root key {} cannot be deleted because step {} has invalid structure".format(root_key, step_name), "INFO")
             return False
-
-    WriteLog("All actions are completed for root key {}".format(root_key), "INFO")
+        if step_data.get("stepState") != 1:
+            WriteLog("Root key {} cannot be deleted because step {} is not completed: {}".format(root_key, step_name, step_data.get("stepState")), "INFO")
+            return False
+    WriteLog("All steps are completed for root key {}".format(root_key), "INFO")
     return True
 
 def IsCriticalEventActive(event_data):
@@ -449,15 +447,15 @@ def ProcessAlertPackages(args, alert_dictionary_list):
         WriteLog("No alert packages found", "INFO")
         return counters
 
-    for alert_dictionary in alert_dictionary_list:
-        if not isinstance(alert_dictionary, dict):
+    for alert_data in alert_dictionary_list:
+        if not isinstance(alert_data, dict):
             WriteLog("Alert package list item is not a dictionary", "ERROR")
             counters["skipped"] = counters["skipped"] + 1
             counters["errors"] = counters["errors"] + 1
             continue
 
-        for root_key in alert_dictionary:
-            ProcessPackage(args, root_key, alert_dictionary[root_key], counters)
+        root_key = alert_data.get("rootKey")
+        ProcessPackage(args, root_key, alert_data, counters)
 
     return counters
 

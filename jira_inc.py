@@ -23,7 +23,7 @@ def MaskSensitiveText(text):
 
 
 def FindStep(alert_data, step_name):
-    for step in alert_data.get("action", {}).values():
+    for step in alert_data.get("steps", {}).values():
         if isinstance(step, dict) and step.get("stepName") == step_name:
             return step
     return {}
@@ -46,18 +46,18 @@ def CreateCriticalJiraIncident(root_key, alert_data, step_data):
 def CreateJiraIncident(root_key, alert_data, step_data):
     new_step = step_data.copy()
     if requests is None:
-        new_step.update({"stepSate": 2, "errorMessage": "requests module is not available"})
+        new_step.update({"stepState": 2, "errorMessage": "requests module is not available"})
         return False, new_step
     insight_id = str(FindStep(alert_data, "resolveInsightId").get("insightId", "")).strip()
     if not insight_id:
-        new_step.update({"stepSate": 2, "errorMessage": "Jira incident was not created: resolveInsightId did not provide insightId"})
+        new_step.update({"stepState": 2, "errorMessage": "Jira incident was not created: resolveInsightId did not provide insightId"})
         return False, new_step
     if not str(JIRA_FIXED_OBJECT_KEY).strip():
-        new_step.update({"stepSate": 2, "errorMessage": "Jira incident was not created: JIRA_FIXED_OBJECT_KEY is empty"})
+        new_step.update({"stepState": 2, "errorMessage": "Jira incident was not created: JIRA_FIXED_OBJECT_KEY is empty"})
         return False, new_step
     incident_type_key = str(FindStep(alert_data, "loadInsightData").get("jiraIncidentTypeKey", "")).strip() or str(JIRA_DEFAULT_INCIDENT_TYPE_KEY).strip()
     if not incident_type_key:
-        new_step.update({"stepSate": 2, "errorMessage": "Jira incident was not created: incident type key is empty"})
+        new_step.update({"stepState": 2, "errorMessage": "Jira incident was not created: incident type key is empty"})
         return False, new_step
     function_object_key = str(FindStep(alert_data, "loadInsightData").get("functionObjectKey", "")).strip()
     fields = {
@@ -78,7 +78,7 @@ def CreateJiraIncident(root_key, alert_data, step_data):
         jira_key = data.get("key")
         if not jira_key:
             raise ValueError("Jira response does not contain issue key")
-        new_step.update({"stepSate": 1, "errorMessage": "", "jiraKey": jira_key, "jiraUrl": BuildJiraBrowseUrl(jira_key)})
+        new_step.update({"stepState": 1, "errorMessage": "", "jiraKey": jira_key, "jiraUrl": BuildJiraBrowseUrl(jira_key)})
         return True, new_step
     except Exception as error:
         status = getattr(getattr(error, "response", None), "status_code", "")
@@ -88,5 +88,5 @@ def CreateJiraIncident(root_key, alert_data, step_data):
             detail += " HTTP {}".format(status)
         if body:
             detail += " {}".format(body)
-        new_step.update({"stepSate": 2, "errorMessage": MaskSensitiveText(detail)})
+        new_step.update({"stepState": 2, "errorMessage": MaskSensitiveText(detail)})
         return False, new_step
