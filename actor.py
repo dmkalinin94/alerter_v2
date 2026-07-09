@@ -354,6 +354,11 @@ def ProcessAlertPackages(args, alert_dictionary_list):
             WriteLog("Alert package list item is not a dictionary", "ERROR")
             continue
         root_key = alert_data.get("rootKey")
+        if not isinstance(root_key, str) or root_key.strip() == "":
+            counters["package_errors"] = counters["package_errors"] + 1
+            WriteLog("Alert package has invalid rootKey", "ERROR")
+            continue
+        WriteLog("Processing package rootKey={}, schemaVersion={}".format(root_key, alert_data.get("schemaVersion")), "INFO")
         try:
             ProcessPackage(args, root_key, alert_data, counters, handlers)
         except Exception as error:

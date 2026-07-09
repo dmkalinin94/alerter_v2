@@ -455,6 +455,13 @@ def ProcessAlertPackages(args, alert_dictionary_list):
             continue
 
         root_key = alert_data.get("rootKey")
+        if not isinstance(root_key, str) or root_key.strip() == "":
+            WriteLog("Alert package has invalid rootKey", "ERROR")
+            counters["skipped"] = counters["skipped"] + 1
+            counters["errors"] = counters["errors"] + 1
+            continue
+
+        WriteLog("Processing package rootKey={}, schemaVersion={}".format(root_key, alert_data.get("schemaVersion")), "INFO")
         ProcessPackage(args, root_key, alert_data, counters)
 
     return counters

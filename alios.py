@@ -616,23 +616,16 @@ def GetTopLevelValueByKey(alert_dictionary_list, root_key):
 
 
 def GetWildcardValues(current_value):
-    result = []
-
     if isinstance(current_value, list):
-        for item in current_value:
-            if isinstance(item, dict):
-                for item_key in item:
-                    result.append(item[item_key])
-            else:
-                result.append(item)
-        return result
+        return list(current_value)
 
     if isinstance(current_value, dict):
+        result = []
         for item_key in current_value:
             result.append(current_value[item_key])
         return result
 
-    return result
+    return []
 
 
 def GetTopLevelKeyFromPathParts(alert_dictionary_list, path_parts):
