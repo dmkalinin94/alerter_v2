@@ -137,21 +137,21 @@ def LoadAlertPackages(args):
     return alert_dictionary_list
 
 
-def AddRequiredActions(args, root_key):
+def AddRequiredSteps(args, root_key):
     command = [
         sys.executable,
         args.cli_path,
         "update",
         "--state-file",
         args.state_file,
-        "--path",
-        "$." + root_key,
-        "--required-actions"
+        "--rootkey",
+        root_key,
+        "--required-steps"
     ]
     result = RunCliCommand(command)
 
     if result.returncode != 0:
-        WriteLog("Failed to add required actions for root key {}".format(root_key), "ERROR")
+        WriteLog("Failed to add required steps for root key {}".format(root_key), "ERROR")
         WriteLog("CLI update return code: {}".format(result.returncode), "ERROR")
         WriteLog("CLI update stderr: {}".format(result.stderr.strip()), "ERROR")
         WriteLog("CLI update stdout: {}".format(result.stdout.strip()), "ERROR")
@@ -164,33 +164,33 @@ def AddRequiredActions(args, root_key):
 
     added_actions = result_data.get("added", [])
     stage = result_data.get("stage", "")
-    WriteLog("Required actions result for root key {}: stage={}, added={}, count={}".format(root_key, stage, ", ".join(added_actions), len(added_actions)), "INFO")
+    WriteLog("Required steps result for root key {}: stage={}, added={}, count={}".format(root_key, stage, ", ".join(added_actions), len(added_actions)), "INFO")
 
     return True, len(added_actions)
 
 
 
 
-def CheckActionsCompleted(root_key, alert_data):
-    action_dictionary = alert_data.get("action")
-    if not isinstance(action_dictionary, dict):
-        WriteLog("Root key {} cannot be deleted because action dictionary is missing or invalid".format(root_key), "INFO")
+def CheckStepsCompleted(root_key, alert_data):
+    steps = alert_data.get("steps")
+    step_order = alert_data.get("stepOrder")
+    if not isinstance(steps, dict) or not isinstance(step_order, list):
+        WriteLog("Root key {} cannot be deleted because steps or stepOrder is missing or invalid".format(root_key), "INFO")
         return False
 
-    for action_name in action_dictionary:
-        action_data = action_dictionary[action_name]
-        if not isinstance(action_data, dict):
-            WriteLog("Root key {} cannot be deleted because action {} has invalid structure".format(root_key, action_name), "INFO")
+    for step_name in step_order:
+        step_data = steps.get(step_name)
+        if not isinstance(step_data, dict):
+            WriteLog("Root key {} cannot be deleted because step {} has invalid structure".format(root_key, step_name), "INFO")
             return False
-        if action_data.get("stepSate") != 1:
-            WriteLog("Root key {} cannot be deleted because action {} is not completed: {}".format(
-                root_key,
-                action_name,
-                action_data.get("stepSate")
-            ), "INFO")
+        if step_data.get("stepName") != step_name:
+            WriteLog("Root key {} cannot be deleted because step {} has mismatched stepName".format(root_key, step_name), "INFO")
+            return False
+        if step_data.get("stepState") != 1:
+            WriteLog("Root key {} cannot be deleted because step {} is not completed: {}".format(root_key, step_name, step_data.get("stepState")), "INFO")
             return False
 
-    WriteLog("All actions are completed for root key {}".format(root_key), "INFO")
+    WriteLog("All steps are completed for root key {}".format(root_key), "INFO")
     return True
 
 def IsCriticalEventActive(event_data):
@@ -371,7 +371,7 @@ def DeletePackage(args, root_key):
         "del",
         "--state-file",
         args.state_file,
-        "--key",
+        "--rootkey",
         root_key
     ]
     result = RunCliCommand(command)
@@ -393,7 +393,7 @@ def DeleteReadyPackage(args, root_key):
         "del-ready",
         "--state-file",
         args.state_file,
-        "--key",
+        "--rootkey",
         root_key
     ]
     result = RunCliCommand(command)
@@ -418,11 +418,11 @@ def ProcessPackage(args, root_key, alert_data, counters):
         counters["errors"] = counters["errors"] + 1
         return
 
-    add_result = AddRequiredActions(args, root_key)
+    add_result = AddRequiredSteps(args, root_key)
     if add_result is False:
         counters["errors"] = counters["errors"] + 1
         return
-    counters["actions_added"] = counters["actions_added"] + add_result[1]
+    counters["steps_added"] = counters["steps_added"] + add_result[1]
 
     response = DeleteReadyPackage(args, root_key)
     if response is None:
@@ -436,31 +436,28 @@ def ProcessPackage(args, root_key, alert_data, counters):
         reason = response.get("reason", "")
         WriteLog("Root key {} was not deleted: {}".format(root_key, reason), "INFO")
 
-def ProcessAlertPackages(args, alert_dictionary_list):
-    counters = {
-        "processed": 0,
-        "actions_added": 0,
-        "deleted": 0,
-        "skipped": 0,
-        "errors": 0
-    }
+def ProcessAlertPackages(args, package_list):
+    counters = {"processed": 0, "steps_added": 0, "deleted": 0, "skipped": 0, "errors": 0}
 
-    if len(alert_dictionary_list) == 0:
+    if len(package_list) == 0:
         WriteLog("No alert packages found", "INFO")
         return counters
 
-    for alert_dictionary in alert_dictionary_list:
-        if not isinstance(alert_dictionary, dict):
+    for package in package_list:
+        if not isinstance(package, dict):
             WriteLog("Alert package list item is not a dictionary", "ERROR")
-            counters["skipped"] = counters["skipped"] + 1
-            counters["errors"] = counters["errors"] + 1
+            counters["skipped"] += 1
+            counters["errors"] += 1
             continue
-
-        for root_key in alert_dictionary:
-            ProcessPackage(args, root_key, alert_dictionary[root_key], counters)
+        root_key = package.get("rootKey")
+        if not isinstance(root_key, str) or root_key.strip() == "":
+            WriteLog("Alert package misses rootKey", "ERROR")
+            counters["skipped"] += 1
+            counters["errors"] += 1
+            continue
+        ProcessPackage(args, root_key, package, counters)
 
     return counters
-
 
 def Main():
     global VERBOSE
@@ -482,7 +479,7 @@ def Main():
 
     WriteLog("Script finished", "INFO")
     WriteLog("Processed packages: {}".format(counters["processed"]), "INFO")
-    WriteLog("Packages with added actions: {}".format(counters["actions_added"]), "INFO")
+    WriteLog("Packages with added steps: {}".format(counters["steps_added"]), "INFO")
     WriteLog("Deleted packages: {}".format(counters["deleted"]), "INFO")
     WriteLog("Skipped packages: {}".format(counters["skipped"]), "INFO")
     WriteLog("Packages with errors: {}".format(counters["errors"]), "INFO")
