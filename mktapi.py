@@ -32,10 +32,7 @@ def NormalizeADLogin(login):
 
 
 def GetLoadInsightDataStep(alert_data):
-    for step in alert_data.get("action", {}).values():
-        if isinstance(step, dict) and step.get("stepName") == "loadInsightData":
-            return step
-    return {}
+    return alert_data.get("steps", {}).get("loadInsightData", {})
 
 
 def BuildNormalizedUniqueADLoginList(values, field_name=None):
@@ -148,10 +145,10 @@ def ResolveKTalkUsers(root_key, alert_data, step_data):
         if normalized and normalized not in requested:
             requested.append(normalized)
     if not requested:
-        new_step.update({"stepSate": 1, "errorMessage": "", "recipientList": [], "notFoundADUserList": [], "withoutMentionIdList": []})
+        new_step.update({"stepState": 1, "errorMessage": "", "recipientList": [], "notFoundADUserList": [], "withoutMentionIdList": []})
         return True, new_step
     if requests is None:
-        new_step.update({"stepSate": 2, "errorMessage": "requests module is not available"})
+        new_step.update({"stepState": 2, "errorMessage": "requests module is not available"})
         return False, new_step
     try:
         headers = {}
@@ -161,8 +158,8 @@ def ResolveKTalkUsers(root_key, alert_data, step_data):
         response = requests.get(RECIPIENT_RESOLVER_URL, headers=headers, params=params, timeout=RECIPIENT_RESOLVER_TIMEOUT_SECONDS, verify=RECIPIENT_RESOLVER_VERIFY_SSL)
         response.raise_for_status()
         found, not_found, without = ParseResolverData(response.json(), requested)
-        new_step.update({"stepSate": 1, "errorMessage": "", "recipientList": found, "notFoundADUserList": not_found, "withoutMentionIdList": without})
+        new_step.update({"stepState": 1, "errorMessage": "", "recipientList": found, "notFoundADUserList": not_found, "withoutMentionIdList": without})
         return True, new_step
     except Exception as error:
-        new_step.update({"stepSate": 2, "errorMessage": MaskSensitiveText("{}: {}".format(type(error).__name__, error))})
+        new_step.update({"stepState": 2, "errorMessage": MaskSensitiveText("{}: {}".format(type(error).__name__, error))})
         return False, new_step
