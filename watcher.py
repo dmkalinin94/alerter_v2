@@ -133,7 +133,7 @@ def LoadAlertPackages(args):
         WriteLog("CLI select root result is not a list", "ERROR")
         sys.exit(1)
 
-    WriteLog("Received alert package dictionaries: {}".format(len(alert_dictionary_list)), "INFO")
+    WriteLog("Received alert packages: {}".format(len(alert_dictionary_list)), "INFO")
     return alert_dictionary_list
 
 
@@ -162,11 +162,11 @@ def AddRequiredSteps(args, root_key):
     except ValueError:
         result_data = {}
 
-    added_actions = result_data.get("added", [])
+    added_steps = result_data.get("added", [])
     stage = result_data.get("stage", "")
-    WriteLog("Required steps result for root key {}: stage={}, added={}, count={}".format(root_key, stage, ", ".join(added_actions), len(added_actions)), "INFO")
+    WriteLog("Required steps result for root key {}: stage={}, added={}, count={}".format(root_key, stage, ", ".join(added_steps), len(added_steps)), "INFO")
 
-    return True, len(added_actions)
+    return True, len(added_steps)
 
 
 

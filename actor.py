@@ -231,7 +231,7 @@ def HandleLoadInsightData(root_key, alert_data, step_data):
     try:
         insight_id_data = alert_data.get("steps", {}).get("resolveInsightId")
         if not isinstance(insight_id_data, dict) or insight_id_data.get("stepState") != 1:
-            raise ValueError("InsightID action is not completed")
+            raise ValueError("InsightID step is not completed")
         insight_id = insight_id_data.get("insightId")
         if not isinstance(insight_id, str) or insight_id.strip() == "":
             raise ValueError("InsightID insightId is empty")
@@ -308,11 +308,11 @@ def ProcessPackage(args, root_key, alert_data, counters, handlers):
             return
         steps[step_name] = new_step_data
         if success:
-            counters["actions_success"] += 1
+            counters["steps_success"] += 1
             if new_step_data.get("stepState") == 0:
                 WriteLog("Step {} waits for continuation".format(step_name), "INFO")
             continue
-        counters["actions_error"] += 1
+        counters["steps_error"] += 1
         WriteLog("Step {} failed for root key {}".format(step_name, root_key), "ERROR")
         if IsMandatoryStep(step_name):
             return
@@ -333,7 +333,7 @@ STEP_HANDLERS = {
 
 def ProcessAlertPackages(args, package_list):
     handlers = STEP_HANDLERS
-    counters = {"processed": 0, "actions_success": 0, "skipped_done": 0, "actions_error": 0, "structure_errors": 0, "cli_write_errors": 0, "package_errors": 0}
+    counters = {"processed": 0, "steps_success": 0, "skipped_done": 0, "steps_error": 0, "structure_errors": 0, "cli_write_errors": 0, "package_errors": 0}
     for package in package_list:
         if not isinstance(package, dict):
             counters["package_errors"] += 1
@@ -425,9 +425,9 @@ def Main():
 
         WriteLog("Actor finished", "INFO")
         WriteLog("Processed packages: {}".format(counters["processed"]), "INFO")
-        WriteLog("Successful actions: {}".format(counters["actions_success"]), "INFO")
-        WriteLog("Skipped completed actions: {}".format(counters["skipped_done"]), "INFO")
-        WriteLog("Actions with errors: {}".format(counters["actions_error"]), "INFO")
+        WriteLog("Successful steps: {}".format(counters["steps_success"]), "INFO")
+        WriteLog("Skipped completed steps: {}".format(counters["skipped_done"]), "INFO")
+        WriteLog("Steps with errors: {}".format(counters["steps_error"]), "INFO")
         WriteLog("Packages with structure errors: {}".format(counters["structure_errors"]), "INFO")
         WriteLog("Package processing errors: {}".format(counters.get("package_errors", 0)), "INFO")
         WriteLog("CLI write errors: {}".format(counters["cli_write_errors"]), "INFO")

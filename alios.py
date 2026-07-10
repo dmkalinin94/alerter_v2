@@ -112,13 +112,11 @@ def GetArgs():
     parser.add_argument("--template", default="inc")
     parser.add_argument("--state-file", dest="state_file", default=STATE_FILE_DEFAULT)
     parser.add_argument("--path", default="$")
-    parser.add_argument("--key")
     parser.add_argument("--rootkey", dest="rootkey")
     parser.add_argument("--tags", default="")
     parser.add_argument("--data")
     parser.add_argument("--json-data", dest="json_data")
-    parser.add_argument("-a", dest="action_keys")
-    parser.add_argument("--severity-actions", dest="severity_actions", action="store_true")
+    parser.add_argument("-a", dest="step_keys")
     parser.add_argument("--required-steps", dest="required_steps", action="store_true")
     parser.add_argument("-l", dest="list_key")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -449,7 +447,7 @@ def FindAlertDictionaryByRootKey(package_list, root_key):
 
 
 def GetRootKeyArg(args):
-    return getattr(args, "rootkey", None) or getattr(args, "key", None)
+    return getattr(args, "rootkey", None)
 
 def GetIntegerValue(value, field_name):
     try:
@@ -491,14 +489,10 @@ def CheckSelectArgs(args):
     CheckRequiredValue(args.path, "--path")
 
 
-def CheckDeleteArgs(args):
-    CheckRequiredValue(args.key, "--key")
-
-
 def CheckUpdateArgs(args):
     CheckRequiredValue(args.path, "--path")
-    if args.data is None and args.json_data is None and args.action_keys is None and not args.severity_actions and not args.required_steps:
-        raise ValueError("Required argument is missing: --data, --json-data, -a, --required-steps or --severity-actions")
+    if args.data is None and args.json_data is None and args.step_keys is None and not args.required_steps:
+        raise ValueError("Required argument is missing: --data, --json-data, -a, --required-steps")
 
 
 def CreateEventOneAlertData(args, root_key):
@@ -711,23 +705,23 @@ def SelectValueByJsonPath(alert_dictionary_list, json_path):
     return current_value
 
 
-def GetRootKeysForListOutput(alert_dictionary_list, json_path):
+def GetRootKeysForListOutput(package_list, json_path):
     root_keys = []
 
     if json_path == "$" or json_path == "$.?":
-        for alert_dictionary in alert_dictionary_list:
-            for root_key in alert_dictionary:
-                root_keys.append(root_key)
+        for package in package_list:
+            if isinstance(package, dict) and isinstance(package.get("rootKey"), str):
+                root_keys.append(package.get("rootKey"))
         return root_keys
 
     if not json_path.startswith("$."):
         raise ValueError("JSON path must start with $ or $.")
 
     path_parts = json_path[2:].split(".")
-    root_key, used_parts = GetTopLevelKeyFromPathParts(alert_dictionary_list, path_parts)
+    root_key, used_parts = GetTopLevelKeyFromPathParts(package_list, path_parts)
 
     if used_parts != len(path_parts):
-        raise ValueError("List output path must point to a first-level dictionary")
+        raise ValueError("List output path must point to a package rootKey")
 
     root_keys.append(root_key)
     return root_keys
@@ -848,27 +842,9 @@ def GetDictionaryByNestedPath(root_value, nested_path):
     return current_value
 
 
-def UpdateValueByJsonPath(alert_dictionary_list, json_path, data):
-    root_key, nested_path = GetRootKeyAndNestedPath(alert_dictionary_list, json_path)
-
-    if len(nested_path) == 0:
-        raise ValueError("Update JSON path must point to a nested key")
-
-    root_value = GetTopLevelValueByKey(alert_dictionary_list, root_key)
-    parent_path = nested_path[0:len(nested_path) - 1]
-    update_key = nested_path[len(nested_path) - 1]
-    parent_dictionary = GetDictionaryByNestedPath(root_value, parent_path)
-
-    if update_key not in parent_dictionary:
-        raise ValueError("JSON path key was not found: {}".format(update_key))
-
-    parent_dictionary[update_key] = data
-    WriteLog("JSON path {} updated".format(json_path), "INFO")
-
-
-def GetActionKeys(action_keys):
+def GetStepKeys(step_keys):
     result = []
-    key_parts = action_keys.split(",")
+    key_parts = step_keys.split(",")
     for key_part in key_parts:
         step_key = key_part.strip()
         if step_key:
@@ -1024,16 +1000,16 @@ def UpdateAlertDictionaryValue(args):
             raise ValueError("--json-data must be a JSON dictionary")
         UpdateValueByJsonPath(alert_dictionary_list, args.path, json_data, args.rootkey)
 
-    if args.action_keys is not None:
-        AddStepsToPackage(GetTopLevelValueByKey(alert_dictionary_list, args.rootkey), GetActionKeys(args.action_keys))
+    if args.step_keys is not None:
+        AddStepsToPackage(GetTopLevelValueByKey(alert_dictionary_list, args.rootkey), GetStepKeys(args.step_keys))
 
     required_steps_result = None
-    if args.severity_actions or args.required_steps:
+    if args.required_steps:
         required_steps_result = AddRequiredStepTemplateKeys(alert_dictionary_list, args.rootkey)
 
     SaveAlertDictionaryList(args.state_file, alert_dictionary_list)
 
-    if args.severity_actions or args.required_steps:
+    if args.required_steps:
         print(json.dumps(required_steps_result, ensure_ascii=False))
 
 
