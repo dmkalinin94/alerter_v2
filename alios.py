@@ -19,12 +19,12 @@ LOG_FILE = "/tmp/alios.log"
 VERBOSE = False
 GROUP_PATTERN = r"SG/([^,/]+)"
 
-BASE_ACTIONS = [
+BASE_STEPS = [
     "resolveInsightId",
     "loadInsightData"
 ]
 
-SEVERITY_ACTION = {
+SEVERITY_STEPS = {
     "0": [],
     "1": ["resolveKTalkUsers", "createLowSeverityJiraIncident", "sendLowSeverityRootMessage", "inviteKTalkUsers", "mentionKTalkUsers", "sendLowSeverityAggregateMessage"],
     "2": ["resolveKTalkUsers", "createLowSeverityJiraIncident", "sendLowSeverityRootMessage", "inviteKTalkUsers", "mentionKTalkUsers", "sendLowSeverityAggregateMessage"],
@@ -35,62 +35,62 @@ SEVERITY_ACTION = {
 
 from config.local_settings_and_secrets import KTALK_AGGREGATE_MESSAGE_REPEAT_COUNT
 
-ACTION_STEP_TEMPLATES = {
+STEP_TEMPLATES = {
     "resolveInsightId": {
-        "stepName": "resolveInsightId", "moduleName": "InsightID", "stepSate": 0,
+        "stepName": "resolveInsightId", "moduleName": "InsightID", "stepState": 0,
         "errorMessage": "", "retryNumber": 0, "insightId": ""
     },
     "loadInsightData": {
-        "stepName": "loadInsightData", "moduleName": "InsightData", "stepSate": 0,
+        "stepName": "loadInsightData", "moduleName": "InsightData", "stepState": 0,
         "errorMessage": "", "retryNumber": 0, "isActiv": 0, "fullName": "",
         "functionObjectKey": "", "jiraIncidentTypeKey": "", "recipientADUserList": []
     },
     "resolveKTalkUsers": {
-        "stepName": "resolveKTalkUsers", "moduleName": "KTalkUsers", "stepSate": 0,
+        "stepName": "resolveKTalkUsers", "moduleName": "KTalkUsers", "stepState": 0,
         "errorMessage": "", "retryNumber": 0, "recipientList": [],
         "notFoundADUserList": [], "withoutMentionIdList": []
     },
     "createLowSeverityJiraIncident": {
-        "stepName": "createLowSeverityJiraIncident", "moduleName": "JiraINC", "stepSate": 0,
+        "stepName": "createLowSeverityJiraIncident", "moduleName": "JiraINC", "stepState": 0,
         "errorMessage": "", "retryNumber": 0, "jiraKey": "", "jiraUrl": ""
     },
     "createCriticalJiraIncident": {
-        "stepName": "createCriticalJiraIncident", "moduleName": "JiraINC", "stepSate": 0,
+        "stepName": "createCriticalJiraIncident", "moduleName": "JiraINC", "stepState": 0,
         "errorMessage": "", "retryNumber": 0, "jiraKey": "", "jiraUrl": ""
     },
     "sendLowSeverityRootMessage": {
-        "stepName": "sendLowSeverityRootMessage", "moduleName": "KTalkMessage", "stepSate": 0,
+        "stepName": "sendLowSeverityRootMessage", "moduleName": "KTalkMessage", "stepState": 0,
         "errorMessage": "", "retryNumber": 0, "messageAttributes": "",
         "messageID": "", "messageDeliveryTime": "", "sended": 0
     },
     "sendCriticalRootMessage": {
-        "stepName": "sendCriticalRootMessage", "moduleName": "KTalkMessage", "stepSate": 0,
+        "stepName": "sendCriticalRootMessage", "moduleName": "KTalkMessage", "stepState": 0,
         "errorMessage": "", "retryNumber": 0, "messageAttributes": "",
         "messageID": "", "messageDeliveryTime": "", "sended": 0
     },
 
     "inviteKTalkUsers": {
-        "stepName": "inviteKTalkUsers", "moduleName": "KTalkMessage", "stepSate": 0,
+        "stepName": "inviteKTalkUsers", "moduleName": "KTalkMessage", "stepState": 0,
         "errorMessage": "", "retryNumber": 0, "sended": 0
     },
     "mentionKTalkUsers": {
-        "stepName": "mentionKTalkUsers", "moduleName": "KTalkMessage", "stepSate": 0,
+        "stepName": "mentionKTalkUsers", "moduleName": "KTalkMessage", "stepState": 0,
         "errorMessage": "", "retryNumber": 0, "sended": 0
     },
     "sendLowSeverityAggregateMessage": {
-        "stepName": "sendLowSeverityAggregateMessage", "moduleName": "KTalkMessage", "stepSate": 1,
+        "stepName": "sendLowSeverityAggregateMessage", "moduleName": "KTalkMessage", "stepState": 1,
         "errorMessage": "", "retryNumber": 0, "targetEventBalance": 1, "deliveredEventBalance": 1,
         "repeatNumber": 0, "repeatLimit": KTALK_AGGREGATE_MESSAGE_REPEAT_COUNT, "successfulDeliveryNumber": 0,
         "messageAttributes": "", "lastMessageID": "", "lastMessageDeliveryTime": "", "nextDeliveryTime": "", "sended": 0
     },
     "sendCriticalAggregateMessage": {
-        "stepName": "sendCriticalAggregateMessage", "moduleName": "KTalkMessage", "stepSate": 1,
+        "stepName": "sendCriticalAggregateMessage", "moduleName": "KTalkMessage", "stepState": 1,
         "errorMessage": "", "retryNumber": 0, "targetEventBalance": 1, "deliveredEventBalance": 1,
         "repeatNumber": 0, "repeatLimit": KTALK_AGGREGATE_MESSAGE_REPEAT_COUNT, "successfulDeliveryNumber": 0,
         "messageAttributes": "", "lastMessageID": "", "lastMessageDeliveryTime": "", "nextDeliveryTime": "", "sended": 0
     }
 }
-ACTION_TEMPLATE_INC = ACTION_STEP_TEMPLATES
+STEP_TEMPLATE_INC = STEP_TEMPLATES
 
 
 
@@ -113,11 +113,13 @@ def GetArgs():
     parser.add_argument("--state-file", dest="state_file", default=STATE_FILE_DEFAULT)
     parser.add_argument("--path", default="$")
     parser.add_argument("--key")
+    parser.add_argument("--rootkey", dest="rootkey")
+    parser.add_argument("--tags", default="")
     parser.add_argument("--data")
     parser.add_argument("--json-data", dest="json_data")
     parser.add_argument("-a", dest="action_keys")
     parser.add_argument("--severity-actions", dest="severity_actions", action="store_true")
-    parser.add_argument("--required-actions", dest="required_actions", action="store_true")
+    parser.add_argument("--required-steps", dest="required_steps", action="store_true")
     parser.add_argument("-l", dest="list_key")
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser
@@ -323,23 +325,34 @@ def ValidateStepSpecificFields(step_data, root_key):
             RequireType(step_data, field, str, root_key, step_name)
 
 
+def DetectOldAlertFormat(alert_dictionary_list):
+    if not isinstance(alert_dictionary_list, list):
+        return False
+    for item in alert_dictionary_list:
+        if isinstance(item, dict) and "rootKey" not in item and len(item) == 1:
+            value = next(iter(item.values()))
+            if isinstance(value, dict) and "action" in value:
+                return True
+    return False
+
+
 def ValidateAlertDictionaryList(alert_dictionary_list, recover_whole_file=False):
     if not isinstance(alert_dictionary_list, list):
         raise ValueError("Invalid state structure: root element must be a list")
+    if DetectOldAlertFormat(alert_dictionary_list):
+        raise ValueError("Incompatible old state structure detected: one-key package dictionaries with action are not supported")
     seen_root_keys = set()
-    for alert_dictionary in alert_dictionary_list:
-        if not isinstance(alert_dictionary, dict) or len(alert_dictionary) != 1:
-            raise ValueError("Invalid package structure: each list item must be a one-key dictionary")
-        root_key = next(iter(alert_dictionary))
-        if str(root_key).strip() == "" or root_key in seen_root_keys:
-            raise ValueError("Invalid or duplicate root key: {}".format(root_key))
-        seen_root_keys.add(root_key)
-        alert_data = alert_dictionary[root_key]
+    for alert_data in alert_dictionary_list:
         if not isinstance(alert_data, dict):
-            raise ValueError("Invalid alert data for root key {}".format(root_key))
-        action_dictionary = alert_data.get("action", {})
-        if action_dictionary is not None and not isinstance(action_dictionary, dict):
-            raise ValueError("Invalid action dictionary for root key {}".format(root_key))
+            raise ValueError("Invalid package structure: each list item must be a dictionary")
+        if "action" in alert_data:
+            raise ValueError("Incompatible old action field for root key {}".format(alert_data.get("rootKey", "<unknown>")))
+        root_key = alert_data.get("rootKey")
+        if not isinstance(root_key, str) or root_key.strip() == "":
+            raise ValueError("Invalid rootKey in package")
+        if root_key in seen_root_keys:
+            raise ValueError("Duplicate rootKey: {}".format(root_key))
+        seen_root_keys.add(root_key)
         value = int(alert_data.get("eventBalance", 0))
         if value < 0:
             raise ValueError("eventBalance is negative for root key {}".format(root_key))
@@ -347,21 +360,32 @@ def ValidateAlertDictionaryList(alert_dictionary_list, recover_whole_file=False)
         severity_value = int(alert_data.get("severity", 0))
         if severity_value < 0 or severity_value > 5:
             raise ValueError("Invalid severity for root key {}".format(root_key))
-        for step_number, step_data in action_dictionary.items():
-            if not IsPositiveIntegerString(step_number):
-                raise ValueError("Incompatible action format for root key {}: step key {} is not a positive numeric string".format(root_key, step_number))
+        step_order = alert_data.get("stepOrder")
+        if not isinstance(step_order, list) or any(not isinstance(x, str) or x.strip() == "" for x in step_order):
+            raise ValueError("Invalid stepOrder for root key {}".format(root_key))
+        if len(step_order) != len(set(step_order)):
+            raise ValueError("Duplicate step names in stepOrder for root key {}".format(root_key))
+        steps_dictionary = alert_data.get("steps")
+        if not isinstance(steps_dictionary, dict):
+            raise ValueError("Invalid steps dictionary for root key {}".format(root_key))
+        for step_name in step_order:
+            if step_name not in steps_dictionary:
+                raise ValueError("stepOrder references missing step {} for root key {}".format(step_name, root_key))
+        for step_key, step_data in steps_dictionary.items():
             if not isinstance(step_data, dict):
-                raise ValueError("Invalid action step {} for root key {}".format(step_number, root_key))
+                raise ValueError("Invalid step {} for root key {}".format(step_key, root_key))
             step_name = step_data.get("stepName")
             module_name = step_data.get("moduleName")
             if not isinstance(step_name, str) or step_name.strip() == "":
-                raise ValueError("Invalid stepName for action step {} root key {}".format(step_number, root_key))
+                raise ValueError("Invalid stepName for step {} root key {}".format(step_key, root_key))
+            if step_key != step_name:
+                raise ValueError("Step key {} does not match stepName {} for root key {}".format(step_key, step_name, root_key))
             if not isinstance(module_name, str) or module_name.strip() == "":
-                raise ValueError("Invalid moduleName for action step {} root key {}".format(step_number, root_key))
-            if int(step_data.get("stepSate", 0)) not in (0, 1, 2):
-                raise ValueError("Invalid stepSate for action step {} root key {}".format(step_number, root_key))
+                raise ValueError("Invalid moduleName for step {} root key {}".format(step_key, root_key))
+            if int(step_data.get("stepState", 0)) not in (0, 1, 2):
+                raise ValueError("Invalid stepState for step {} root key {}".format(step_key, root_key))
             if int(step_data.get("retryNumber", 0)) < 0:
-                raise ValueError("Invalid retryNumber for action step {} root key {}".format(step_number, root_key))
+                raise ValueError("Invalid retryNumber for step {} root key {}".format(step_key, root_key))
             ValidateStepSpecificFields(step_data, root_key)
     return True
 
@@ -413,12 +437,19 @@ def SaveAlertDictionaryList(state_file, alert_dictionary_list):
     WriteLog("State saved to {}".format(state_file), "INFO")
 
 
-def FindAlertDictionaryByRootKey(alert_dictionary_list, root_key):
-    for alert_dictionary in alert_dictionary_list:
-        if root_key in alert_dictionary:
-            return alert_dictionary
+def FindPackageByRootKey(package_list, root_key):
+    for package in package_list:
+        if isinstance(package, dict) and package.get("rootKey") == root_key:
+            return package
     return None
 
+
+def FindAlertDictionaryByRootKey(package_list, root_key):
+    return FindPackageByRootKey(package_list, root_key)
+
+
+def GetRootKeyArg(args):
+    return getattr(args, "rootkey", None) or getattr(args, "key", None)
 
 def GetIntegerValue(value, field_name):
     try:
@@ -466,27 +497,27 @@ def CheckDeleteArgs(args):
 
 def CheckUpdateArgs(args):
     CheckRequiredValue(args.path, "--path")
-    if args.data is None and args.json_data is None and args.action_keys is None and not args.severity_actions and not args.required_actions:
-        raise ValueError("Required argument is missing: --data, --json-data, -a, --required-actions or --severity-actions")
+    if args.data is None and args.json_data is None and args.action_keys is None and not args.severity_actions and not args.required_steps:
+        raise ValueError("Required argument is missing: --data, --json-data, -a, --required-steps or --severity-actions")
 
 
-def CreateEventOneAlertData(args):
-    action_template = GetActionTemplate(args.template)
-
+def CreateEventOneAlertData(args, root_key):
     alert_data = {
+        "rootKey": root_key,
         "event": "1",
         "groups": args.groups,
         "triggerTime": args.trigger_time,
         "trigName": args.trig_name,
+        "tags": getattr(args, "tags", "") or "",
         "message": args.message,
         "severity": args.severity,
-        "action": CopyDictionary(action_template),
         "eventBalance": 1,
         "criticalEvent": {},
-        "zeroRecaveryBalance": ""
+        "zeroRecaveryBalance": "",
+        "stepOrder": [],
+        "steps": {}
     }
     return alert_data
-
 
 def RemoveUnusedBalanceKey(alert_data):
     if "balance" in alert_data:
@@ -504,16 +535,16 @@ def ApplyEventOneToAlertList(alert_dictionary_list, root_key, args):
     event_id = str(args.eventid)
 
     if alert_dictionary is None:
-        alert_data = CreateEventOneAlertData(args)
+        alert_data = CreateEventOneAlertData(args, root_key)
         if new_severity == 5:
             alert_data["criticalEvent"][event_id] = {"startTime": args.trigger_time, "endTime": ""}
-        alert_dictionary_list.append({root_key: alert_data.copy()})
+        alert_dictionary_list.append(alert_data.copy())
         WriteLog("Root key {} added with event balance {}".format(root_key, alert_data["eventBalance"]), "INFO")
         if new_severity == 5:
             WriteLog("Critical event opened for root key {} eventId {} startTime {} eventBalance {}".format(root_key, event_id, args.trigger_time, alert_data["eventBalance"]), "INFO")
         return
 
-    alert_data = alert_dictionary[root_key]
+    alert_data = alert_dictionary
     if not isinstance(alert_data, dict):
         raise ValueError("Invalid alert data for root key {}".format(root_key))
 
@@ -534,8 +565,6 @@ def ApplyEventOneToAlertList(alert_dictionary_list, root_key, args):
         alert_data["eventBalance"] = old_event_balance + 1
         alert_data["zeroRecaveryBalance"] = ""
 
-    if "action" not in alert_data:
-        alert_data["action"] = GetActionTemplate(args.template)
     if new_severity > old_severity:
         alert_data["severity"] = args.severity
 
@@ -558,7 +587,7 @@ def ApplyEventZeroToAlertList(alert_dictionary_list, root_key, args):
         WriteLog("Root key {} was not found for event 0, nothing changed".format(root_key), "INFO")
         return
 
-    alert_data = alert_dictionary[root_key]
+    alert_data = alert_dictionary
     if not isinstance(alert_data, dict):
         raise ValueError("Invalid alert data for root key {}".format(root_key))
 
@@ -594,13 +623,11 @@ def ApplyEventZeroToAlertList(alert_dictionary_list, root_key, args):
     WriteLog("Root key {} decreased, event balance is {}".format(root_key, alert_data["eventBalance"]), "INFO")
 
 
-def GetTopLevelValueByKey(alert_dictionary_list, root_key):
-    alert_dictionary = FindAlertDictionaryByRootKey(alert_dictionary_list, root_key)
-    if alert_dictionary is None:
+def GetTopLevelValueByKey(package_list, root_key):
+    package = FindPackageByRootKey(package_list, root_key)
+    if package is None:
         raise ValueError("Root key was not found: {}".format(root_key))
-
-    return alert_dictionary[root_key]
-
+    return package
 
 def GetWildcardValues(current_value):
     result = []
@@ -638,6 +665,15 @@ def GetTopLevelKeyFromPathParts(alert_dictionary_list, path_parts):
 def SelectValueByJsonPath(alert_dictionary_list, json_path):
     if json_path == "$":
         return alert_dictionary_list
+    if isinstance(alert_dictionary_list, dict):
+        if not json_path.startswith("$."):
+            raise ValueError("JSON path must start with $ or $.")
+        current_value = alert_dictionary_list
+        for path_part in json_path[2:].split("."):
+            if not isinstance(current_value, dict) or path_part not in current_value:
+                raise ValueError("JSON path key was not found: {}".format(path_part))
+            current_value = current_value[path_part]
+        return current_value
 
     if not json_path.startswith("$."):
         raise ValueError("JSON path must start with $ or $.")
@@ -715,7 +751,10 @@ def SelectListValuesByKey(alert_dictionary_list, json_path, list_key):
 def SelectAlertDictionaryList(args):
     CheckSelectArgs(args)
     alert_dictionary_list = LoadAlertDictionaryList(args.state_file)
-    if args.list_key is not None:
+    if args.rootkey is not None:
+        package = GetTopLevelValueByKey(alert_dictionary_list, args.rootkey)
+        selected_value = package if args.path == "$" else SelectValueByJsonPath(package, args.path)
+    elif args.list_key is not None:
         selected_value = SelectListValuesByKey(alert_dictionary_list, args.path, args.list_key)
     else:
         selected_value = SelectValueByJsonPath(alert_dictionary_list, args.path)
@@ -724,23 +763,14 @@ def SelectAlertDictionaryList(args):
 
 
 def DeleteAlertDictionaryByRootKey(args):
-    CheckDeleteArgs(args)
-    alert_dictionary_list = LoadAlertDictionaryList(args.state_file)
-    new_alert_dictionary_list = []
-    deleted = False
-
-    for alert_dictionary in alert_dictionary_list:
-        if args.key in alert_dictionary:
-            deleted = True
-            WriteLog("Root key {} deleted".format(args.key), "INFO")
-        else:
-            new_alert_dictionary_list.append(alert_dictionary)
-
-    if not deleted:
-        raise ValueError("Root key was not found: {}".format(args.key))
-
-    SaveAlertDictionaryList(args.state_file, new_alert_dictionary_list)
-
+    root_key = GetRootKeyArg(args)
+    CheckRequiredValue(root_key, "--rootkey")
+    package_list = LoadAlertDictionaryList(args.state_file)
+    new_package_list = [package for package in package_list if not (isinstance(package, dict) and package.get("rootKey") == root_key)]
+    if len(new_package_list) == len(package_list):
+        raise ValueError("Root key was not found: {}".format(root_key))
+    WriteLog("Root key {} deleted".format(root_key), "INFO")
+    SaveAlertDictionaryList(args.state_file, new_package_list)
 
 def LogAddArguments(args):
     argument_dictionary = vars(args)
@@ -840,42 +870,18 @@ def GetActionKeys(action_keys):
     result = []
     key_parts = action_keys.split(",")
     for key_part in key_parts:
-        action_key = key_part.strip()
-        if action_key:
-            result.append(action_key)
+        step_key = key_part.strip()
+        if step_key:
+            result.append(step_key)
     if not result:
-        raise ValueError("No action keys were provided")
+        raise ValueError("No step keys were provided")
     return result
 
 
-def GetOrderedStepKeys(action_dictionary):
-    if not isinstance(action_dictionary, dict):
-        raise ValueError("Action value is not a dictionary")
-    for step_number in action_dictionary.keys():
-        if not IsPositiveIntegerString(step_number):
-            raise ValueError("Incompatible action format: step key {} is not a positive numeric string".format(step_number))
-    return sorted(action_dictionary.keys(), key=lambda value: int(value))
-
-
-def GetNextStepNumber(action_dictionary):
-    ordered_keys = GetOrderedStepKeys(action_dictionary)
-    if not ordered_keys:
-        return "1"
-    return str(max(int(value) for value in ordered_keys) + 1)
-
-
-def FindStepByName(action_dictionary, step_name):
-    for step_number in GetOrderedStepKeys(action_dictionary):
-        step_data = action_dictionary.get(step_number)
-        if isinstance(step_data, dict) and step_data.get("stepName") == step_name:
-            return step_number, step_data
-    return None, None
-
-
 def MakeStepByName(step_name, alert_data=None):
-    if step_name not in ACTION_STEP_TEMPLATES:
-        raise ValueError("Action template key was not found: {}".format(step_name))
-    step_data = CopyDictionary(ACTION_STEP_TEMPLATES[step_name])
+    if step_name not in STEP_TEMPLATES:
+        raise ValueError("Step template key was not found: {}".format(step_name))
+    step_data = CopyDictionary(STEP_TEMPLATES[step_name])
     if step_name in ("sendLowSeverityAggregateMessage", "sendCriticalAggregateMessage") and isinstance(alert_data, dict):
         event_balance = int(alert_data.get("eventBalance", 1))
         step_data["targetEventBalance"] = event_balance
@@ -883,96 +889,79 @@ def MakeStepByName(step_name, alert_data=None):
         step_data["repeatNumber"] = 0
         step_data["successfulDeliveryNumber"] = 0
         step_data["repeatLimit"] = KTALK_AGGREGATE_MESSAGE_REPEAT_COUNT
-        if event_balance == 1:
-            step_data["stepSate"] = 1
-            step_data["deliveredEventBalance"] = 1
-        else:
-            step_data["stepSate"] = 0
+        step_data["stepState"] = 1 if event_balance == 1 else 0
     return step_data
 
 
-def AddStepByName(action_dictionary, step_name, alert_data=None):
-    existing_step_number, _ = FindStepByName(action_dictionary, step_name)
-    if existing_step_number is not None:
-        return None
-    step_number = GetNextStepNumber(action_dictionary)
-    action_dictionary[step_number] = MakeStepByName(step_name, alert_data)
-    return step_number
-
-
-def AddActionTemplateKeysByJsonPath(alert_dictionary_list, json_path, action_keys):
-    root_key, nested_path = GetRootKeyAndNestedPath(alert_dictionary_list, json_path)
-    if len(nested_path) != 0:
-        raise ValueError("Action keys can be added only to a first-level dictionary")
-    root_value = GetTopLevelValueByKey(alert_dictionary_list, root_key)
-    if "action" not in root_value or root_value["action"] is None:
-        root_value["action"] = {}
-    if not isinstance(root_value["action"], dict):
-        raise ValueError("Action value is not a dictionary for root key {}".format(root_key))
-    for action_key in GetActionKeys(action_keys):
-        step_number = AddStepByName(root_value["action"], action_key, root_value)
-        if step_number is None:
-            WriteLog("Action step {} already exists for root key {}, nothing changed".format(action_key, root_key), "INFO")
-        else:
-            WriteLog("Action step {} added as #{} to root key {}".format(action_key, step_number, root_key), "INFO")
-
-
-def GetSeverityActionKeys(root_value):
+def GetSeverityStepKeys(root_value):
     severity_key = str(root_value.get("severity"))
-    if severity_key not in SEVERITY_ACTION:
+    if severity_key not in SEVERITY_STEPS:
         raise ValueError("Unknown severity: {}".format(severity_key))
     WriteLog("Package severity: {}".format(severity_key), "INFO")
-    return SEVERITY_ACTION[severity_key]
+    return SEVERITY_STEPS[severity_key]
 
 
-def AddSeverityActionTemplateKeysByJsonPath(alert_dictionary_list, json_path):
-    root_key, nested_path = GetRootKeyAndNestedPath(alert_dictionary_list, json_path)
-    if len(nested_path) != 0:
-        raise ValueError("Severity action keys can be added only to a first-level dictionary")
-    root_value = GetTopLevelValueByKey(alert_dictionary_list, root_key)
-    if "action" not in root_value or root_value["action"] is None:
-        root_value["action"] = {}
-    added = []
-    for step_name in GetSeverityActionKeys(root_value):
-        if AddStepByName(root_value["action"], step_name, root_value) is not None:
-            added.append(step_name)
-    return added
-
-
-def GetActionStage(alert_data):
-    action_dictionary = alert_data.get("action", {})
-    _, insight_data = FindStepByName(action_dictionary, "loadInsightData") if isinstance(action_dictionary, dict) else (None, None)
-    if not isinstance(insight_data, dict):
+def GetStepStage(alert_data):
+    load_insight_data = alert_data.get("steps", {}).get("loadInsightData")
+    if not isinstance(load_insight_data, dict):
         return "insight_check"
-    if int(insight_data.get("stepSate", 0)) != 1:
+    if int(load_insight_data.get("stepState", 0)) != 1:
         return "insight_check"
-    if int(insight_data.get("isActiv", 0)) == 1:
+    if int(load_insight_data.get("isActiv", 0)) == 1:
         return "active_service"
     return "inactive_service"
 
 
-def GetRequiredActionKeys(alert_data):
-    required = list(BASE_ACTIONS)
-    if GetActionStage(alert_data) == "active_service":
-        for step_name in GetSeverityActionKeys(alert_data):
+def GetRequiredStepKeys(alert_data):
+    required = list(BASE_STEPS)
+    if GetStepStage(alert_data) == "active_service":
+        for step_name in GetSeverityStepKeys(alert_data):
             if step_name not in required:
                 required.append(step_name)
     return required
 
 
+def AddStepsToPackage(package, required_step_keys, reset_existing=False):
+    if "steps" not in package or package["steps"] is None:
+        package["steps"] = {}
+    if "stepOrder" not in package or package["stepOrder"] is None:
+        package["stepOrder"] = []
+    if not isinstance(package["steps"], dict) or not isinstance(package["stepOrder"], list):
+        raise ValueError("Invalid steps or stepOrder for root key {}".format(package.get("rootKey")))
+    added = []
+    if reset_existing:
+        package["stepOrder"] = list(required_step_keys)
+        for step_name in required_step_keys:
+            package["steps"][step_name] = MakeStepByName(step_name, package)
+            added.append(step_name)
+        return added
+    for step_name in required_step_keys:
+        if step_name not in package["steps"]:
+            package["steps"][step_name] = MakeStepByName(step_name, package)
+            added.append(step_name)
+        if step_name not in package["stepOrder"]:
+            package["stepOrder"].append(step_name)
+    return added
+
+
+def IsLowSeverityRoute(package):
+    low_steps = {"createLowSeverityJiraIncident", "sendLowSeverityRootMessage", "sendLowSeverityAggregateMessage"}
+    return any(step_name in package.get("stepOrder", []) or step_name in package.get("steps", {}) for step_name in low_steps)
+
+
 def ResetAggregateStepForBalanceIfNeeded(alert_data):
-    action_dictionary = alert_data.get("action")
-    if not isinstance(action_dictionary, dict):
+    steps = alert_data.get("steps")
+    if not isinstance(steps, dict):
         return False
     severity = str(alert_data.get("severity"))
-    aggregate_step_name = "sendCriticalAggregateMessage" if severity == "5" else "sendLowSeverityAggregateMessage"
-    _, aggregate_step = FindStepByName(action_dictionary, aggregate_step_name)
+    aggregate_step_name = "sendCriticalAggregateMessage" if severity == "5" and "sendCriticalAggregateMessage" in alert_data.get("stepOrder", []) else "sendLowSeverityAggregateMessage"
+    aggregate_step = steps.get(aggregate_step_name)
     if not isinstance(aggregate_step, dict):
         return False
     event_balance = int(alert_data.get("eventBalance", 0))
     if int(aggregate_step.get("targetEventBalance", -1)) == event_balance:
         return False
-    aggregate_step["stepSate"] = 0
+    aggregate_step["stepState"] = 0
     aggregate_step["errorMessage"] = ""
     aggregate_step["retryNumber"] = 0
     aggregate_step["targetEventBalance"] = event_balance
@@ -987,32 +976,44 @@ def ResetAggregateStepForBalanceIfNeeded(alert_data):
     return True
 
 
-def AddRequiredActionTemplateKeysByJsonPath(alert_dictionary_list, json_path):
-    root_key, nested_path = GetRootKeyAndNestedPath(alert_dictionary_list, json_path)
-    if len(nested_path) != 0:
-        raise ValueError("Required action keys can be added only to a first-level dictionary")
+def AddRequiredStepTemplateKeys(package_list, root_key):
+    package = GetTopLevelValueByKey(package_list, root_key)
+    required_step_keys = GetRequiredStepKeys(package)
+    critical_route = list(BASE_STEPS) + SEVERITY_STEPS["5"]
+    severity_escalated = str(package.get("severity")) == "5" and package.get("stepOrder") != critical_route and IsLowSeverityRoute(package)
+    route_changed = False
+    if severity_escalated:
+        required_step_keys = critical_route
+        added = AddStepsToPackage(package, required_step_keys, reset_existing=True)
+        route_changed = True
+    else:
+        before = list(package.get("stepOrder", []))
+        added = AddStepsToPackage(package, required_step_keys, reset_existing=False)
+        route_changed = before != package.get("stepOrder", [])
+    return {"added": added, "required": required_step_keys, "stage": GetStepStage(package), "routeChanged": route_changed, "severityEscalatedToCritical": severity_escalated}
+
+
+def UpdateValueByJsonPath(alert_dictionary_list, json_path, data, root_key=None):
+    if root_key is None:
+        raise ValueError("--rootkey is required for update")
     root_value = GetTopLevelValueByKey(alert_dictionary_list, root_key)
-    if not isinstance(root_value, dict):
-        raise ValueError("Selected root value is not a dictionary: {}".format(root_key))
-    if "action" not in root_value or root_value["action"] is None:
-        root_value["action"] = {}
-    if not isinstance(root_value["action"], dict):
-        raise ValueError("Action value is not a dictionary for root key {}".format(root_key))
-    required_action_keys = GetRequiredActionKeys(root_value)
-    added = []
-    for step_name in required_action_keys:
-        step_number = AddStepByName(root_value["action"], step_name, root_value)
-        if step_number is not None:
-            added.append(step_name)
-            WriteLog("Required action step {} added as #{} to root key {}".format(step_name, step_number, root_key), "INFO")
-    return {"added": added, "required": required_action_keys, "stage": GetActionStage(root_value)}
+    nested_path = [] if json_path == "$" else GetPathParts(json_path)
+    if len(nested_path) == 0:
+        raise ValueError("Update JSON path must point to a nested key")
+    parent_path = nested_path[0:len(nested_path) - 1]
+    update_key = nested_path[len(nested_path) - 1]
+    parent_dictionary = GetDictionaryByNestedPath(root_value, parent_path)
+    if update_key not in parent_dictionary:
+        raise ValueError("JSON path key was not found: {}".format(update_key))
+    parent_dictionary[update_key] = data
+    WriteLog("JSON path {} updated for root key {}".format(json_path, root_key), "INFO")
 
 def UpdateAlertDictionaryValue(args):
     CheckUpdateArgs(args)
     alert_dictionary_list = LoadAlertDictionaryList(args.state_file)
 
     if args.data is not None:
-        UpdateValueByJsonPath(alert_dictionary_list, args.path, args.data)
+        UpdateValueByJsonPath(alert_dictionary_list, args.path, args.data, args.rootkey)
 
     if args.json_data is not None:
         try:
@@ -1021,19 +1022,19 @@ def UpdateAlertDictionaryValue(args):
             raise ValueError("Invalid JSON in --json-data: {}".format(error))
         if not isinstance(json_data, dict):
             raise ValueError("--json-data must be a JSON dictionary")
-        UpdateValueByJsonPath(alert_dictionary_list, args.path, json_data)
+        UpdateValueByJsonPath(alert_dictionary_list, args.path, json_data, args.rootkey)
 
     if args.action_keys is not None:
-        AddActionTemplateKeysByJsonPath(alert_dictionary_list, args.path, args.action_keys)
+        AddStepsToPackage(GetTopLevelValueByKey(alert_dictionary_list, args.rootkey), GetActionKeys(args.action_keys))
 
-    required_actions_result = None
-    if args.severity_actions or args.required_actions:
-        required_actions_result = AddRequiredActionTemplateKeysByJsonPath(alert_dictionary_list, args.path)
+    required_steps_result = None
+    if args.severity_actions or args.required_steps:
+        required_steps_result = AddRequiredStepTemplateKeys(alert_dictionary_list, args.rootkey)
 
     SaveAlertDictionaryList(args.state_file, alert_dictionary_list)
 
-    if args.severity_actions or args.required_actions:
-        print(json.dumps(required_actions_result, ensure_ascii=False))
+    if args.severity_actions or args.required_steps:
+        print(json.dumps(required_steps_result, ensure_ascii=False))
 
 
 DATETIME_FORMAT = "%Y.%m.%d %H:%M:%S"
@@ -1075,47 +1076,51 @@ def MakeDeleteReadyResponse(deleted, key, reason):
     return {"deleted": deleted, "key": key, "reason": reason}
 
 def DeleteReadyAlertDictionaryByRootKey(args):
-    CheckDeleteArgs(args)
-    alert_dictionary_list = LoadAlertDictionaryList(args.state_file)
-    alert_dictionary = FindAlertDictionaryByRootKey(alert_dictionary_list, args.key)
-    if alert_dictionary is None:
-        response = MakeDeleteReadyResponse(False, args.key, "root key was not found")
+    root_key = GetRootKeyArg(args)
+    CheckRequiredValue(root_key, "--rootkey")
+    package_list = LoadAlertDictionaryList(args.state_file)
+    alert_data = FindPackageByRootKey(package_list, root_key)
+    if alert_data is None:
+        response = MakeDeleteReadyResponse(False, root_key, "root key was not found")
         print(json.dumps(response, ensure_ascii=False, indent=4))
         return
-    alert_data = alert_dictionary[args.key]
-    action_dictionary = alert_data.get("action")
-    if not isinstance(action_dictionary, dict):
-        raise ValueError("Action value is not a dictionary for root key {}".format(args.key))
-    for action_name, action_data in action_dictionary.items():
-        if not isinstance(action_data, dict):
-            raise ValueError("action {} has invalid structure".format(action_name))
-        step_state = int(action_data.get("stepSate", 0))
+    steps = alert_data.get("steps")
+    step_order = alert_data.get("stepOrder")
+    if not isinstance(steps, dict) or not isinstance(step_order, list):
+        raise ValueError("steps or stepOrder has invalid structure for root key {}".format(root_key))
+    for step_name in step_order:
+        step_data = steps.get(step_name)
+        if not isinstance(step_data, dict):
+            raise ValueError("step {} has invalid structure".format(step_name))
+        if step_data.get("stepName") != step_name:
+            raise ValueError("step {} has mismatched stepName".format(step_name))
+        step_state = int(step_data.get("stepState", 0))
         if step_state != 1:
-            print(json.dumps(MakeDeleteReadyResponse(False, args.key, "action {} has stepSate {}".format(action_name, step_state)), ensure_ascii=False, indent=4))
+            print(json.dumps(MakeDeleteReadyResponse(False, root_key, "step {} has stepState {}".format(step_name, step_state)), ensure_ascii=False, indent=4))
             return
     if int(alert_data.get("eventBalance", 0)) != 0:
-        print(json.dumps(MakeDeleteReadyResponse(False, args.key, "eventBalance is not zero"), ensure_ascii=False, indent=4))
+        print(json.dumps(MakeDeleteReadyResponse(False, root_key, "eventBalance is not zero"), ensure_ascii=False, indent=4))
         return
-    active_critical_event_id = FindActiveCriticalEventId(alert_data, args.key)
+    active_critical_event_id = FindActiveCriticalEventId(alert_data, root_key)
     if not isinstance(alert_data.get("criticalEvent"), dict):
-        print(json.dumps(MakeDeleteReadyResponse(False, args.key, "criticalEvent is missing or invalid"), ensure_ascii=False, indent=4))
+        print(json.dumps(MakeDeleteReadyResponse(False, root_key, "criticalEvent is missing or invalid"), ensure_ascii=False, indent=4))
         return
     if active_critical_event_id is not None:
-        print(json.dumps(MakeDeleteReadyResponse(False, args.key, "criticalEvent contains active event {}".format(active_critical_event_id)), ensure_ascii=False, indent=4))
+        print(json.dumps(MakeDeleteReadyResponse(False, root_key, "criticalEvent contains active event {}".format(active_critical_event_id)), ensure_ascii=False, indent=4))
         return
     zero_recavery_balance = alert_data.get("zeroRecaveryBalance")
     if zero_recavery_balance is None or str(zero_recavery_balance).strip() == "":
-        print(json.dumps(MakeDeleteReadyResponse(False, args.key, "zeroRecaveryBalance is empty"), ensure_ascii=False, indent=4))
+        print(json.dumps(MakeDeleteReadyResponse(False, root_key, "zeroRecaveryBalance is empty"), ensure_ascii=False, indent=4))
         return
     zero_recavery_balance_datetime = ParseTimeValue(zero_recavery_balance)
     delay_minutes = GetDeleteDelayMinutes(zero_recavery_balance_datetime)
     age_minutes = int((datetime.datetime.now() - zero_recavery_balance_datetime).total_seconds() / 60)
     if age_minutes < delay_minutes:
-        print(json.dumps(MakeDeleteReadyResponse(False, args.key, "package age is less than delete delay"), ensure_ascii=False, indent=4))
+        print(json.dumps(MakeDeleteReadyResponse(False, root_key, "package age is less than delete delay"), ensure_ascii=False, indent=4))
         return
-    new_list = [item for item in alert_dictionary_list if args.key not in item]
+    new_list = [item for item in package_list if not (isinstance(item, dict) and item.get("rootKey") == root_key)]
     SaveAlertDictionaryList(args.state_file, new_list)
-    print(json.dumps(MakeDeleteReadyResponse(True, args.key, ""), ensure_ascii=False, indent=4))
+    print(json.dumps(MakeDeleteReadyResponse(True, root_key, ""), ensure_ascii=False, indent=4))
 
 ############################### BODY ###############################
 
